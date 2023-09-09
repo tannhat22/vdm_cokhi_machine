@@ -2,6 +2,8 @@ import time
 import socket
 import rclpy
 from rclpy.node import Node
+import sqlite3
+import os
 
 # from geometry_msgs.msg import Pose, PoseWithCovarianceStamped
 # from std_msgs.msg import Bool, String
@@ -20,6 +22,13 @@ class PcReadPlc(Node):
             self._is_connected = self.socket_connect(self.IP_addres_PLC, self.port_addres_PLC)
         time.sleep(1.0)
 
+        # Database path:
+        self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        self.tableName = 'MACHINE'
+        self.create_table_db(self.tableName)
+        self.machine_info = self.get_machine_name()
+
+        # Ros pub, sub:
         self.pub_state_machine = self.create_publisher(StateMachineStamped, '/state_machine', 10)
 
         # self.bool_true = Bool()
@@ -27,16 +36,16 @@ class PcReadPlc(Node):
 
         # self.bool_false = Bool()
         # self.bool_false.data = False
-
-        self.machine_quatity = 50
+        
         self.signalLight_bit_start = '1'
-        self.signalLight_bit_length = self.machine_quatity * 3
+        self.signalLight_bit_length = self.machine_info['quantity'] * 3
         self.time_res_start = '1'
-        self.time_res_length = self.machine_quatity * 2
+        self.time_res_length = self.machine_info['quantity'] * 2
 
         timer_period = 0.2
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
+
 
     #"Connect to PLC:"
     def socket_connect(self,host, port):
@@ -48,6 +57,38 @@ class PcReadPlc(Node):
             self.get_logger().info("can't connect to PLC, will auto reconneting after 2s")
             time.sleep(2)
             return False
+
+    def create_table_db(self, tableName):
+        try:
+            conn = sqlite3.connect(self.database_path)
+            print("Opened database successfully")
+            cur = conn.cursor()
+            cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
+            ''' (ID INT PRIMARY KEY     NOT NULL,
+                 NAME           TEXT    NOT NULL);''')
+        except Exception as e:
+            print(Exception)
+        return
+    
+    def get_machine_name(self):
+        try:
+            conn = sqlite3.connect(self.database_path)
+            cur = conn.cursor()
+            cur.execute("SELECT * from " + self.tableName)
+            num = 0
+            result = {
+                'quantity': 0,
+                'machineName': []
+            }
+            for row in cur:
+                result['machineName'].append(row[1]) 
+                num += 1
+            result['quantity'] = num
+
+            return result
+        except Exception as e:
+            print(Exception)
+
 
     #"Read bit. Ex: MR10 => deviceType: 'M', deviceNo: 100"
     # format: .U: Unsigned 16-bit DEC
@@ -104,12 +145,14 @@ class PcReadPlc(Node):
         data_signalLight = self.read_bit('MR',self.signalLight_bit_start,'',self.signalLight_bit_length)
         data_time = self.read_register('DM',self.time_res_start,'',self.time_res_length)
 
+
         msg = StateMachineStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.state_machine.number_machine = self.machine_quatity
+        msg.state_machine.number_machine = self.machine_info['quantity']
+        msg.state_machine.machine_name = self.machine_info['machineName']
+        msg.state_machine.time_noload = data_time[:self.machine_info['quantity']]
+        msg.state_machine.time_load = data_time[self.machine_info['quantity']:]
         msg.state_machine.signal_light = data_signalLight
-        msg.state_machine.time_noload = data_time[:self.machine_quatity]
-        msg.state_machine.time_load = data_time[self.machine_quatity:]
         self.pub_state_machine.publish(msg)
 
 def main(args=None):
