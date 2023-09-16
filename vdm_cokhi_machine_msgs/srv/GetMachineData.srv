@@ -1,0 +1,6 @@
+int32 id_machine
+int32 days
+---
+string[] dates  
+int32[] noload_time
+int32[] underload_time

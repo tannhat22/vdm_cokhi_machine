@@ -11,12 +11,18 @@ find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 set(msg_files
-  "msg/StateMachine.msg"
-  "msg/StateMachineStamped.msg"
+  "msg/StateMachines.msg"
+  "msg/StateMachinesStamped.msg"
+)
+
+set(srv_files
+  "srv/GetAllMachineName.srv"
+  "srv/GetMachineData.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
+  ${srv_files}
   DEPENDENCIES builtin_interfaces std_msgs
 )
 

@@ -1,0 +1,4 @@
+bool get_allname
+---
+int32 machines_quantity
+string[] machines_name

@@ -7,7 +7,8 @@ import os
 
 # from geometry_msgs.msg import Pose, PoseWithCovarianceStamped
 # from std_msgs.msg import Bool, String
-from vdm_cokhi_machine_msgs.msg import StateMachineStamped
+from vdm_cokhi_machine_msgs.msg import StateMachinesStamped
+from vdm_cokhi_machine_msgs.srv import GetAllMachineName
 
 class PcReadPlc(Node):
     def __init__(self):
@@ -26,10 +27,13 @@ class PcReadPlc(Node):
         self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINE'
         self.create_table_db(self.tableName)
-        self.machine_info = self.get_machine_name()
+        self.machine_info = self.get_all_machine_name_db()
+
+        # Ros Services:
+        self.getAllMachineName_srv = self.create_service(GetAllMachineName, 'get_all_machine_name', self.get_all_machine_name_cb)
 
         # Ros pub, sub:
-        self.pub_state_machine = self.create_publisher(StateMachineStamped, '/state_machine', 10)
+        self.pub_state_machine = self.create_publisher(StateMachinesStamped, '/state_machines', 10)
 
         # self.bool_true = Bool()
         # self.bool_true.data = True
@@ -70,7 +74,7 @@ class PcReadPlc(Node):
             print(Exception)
         return
     
-    def get_machine_name(self):
+    def get_all_machine_name_db(self):
         try:
             conn = sqlite3.connect(self.database_path)
             cur = conn.cursor()
@@ -88,6 +92,14 @@ class PcReadPlc(Node):
             return result
         except Exception as e:
             print(Exception)
+
+    def get_all_machine_name_cb(self, request: GetAllMachineName.Request, respone: GetAllMachineName.Response):
+        if request.get_allname:
+            infoNames = self.get_all_machine_name_db()
+            respone.machines_quantity = infoNames['quantity']
+            respone.machines_name = infoNames['machineName']
+            return respone
+
 
 
     #"Read bit. Ex: MR10 => deviceType: 'M', deviceNo: 100"
@@ -146,13 +158,13 @@ class PcReadPlc(Node):
         data_time = self.read_register('DM',self.time_res_start,'',self.time_res_length)
 
 
-        msg = StateMachineStamped()
+        msg = StateMachinesStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.state_machine.number_machine = self.machine_info['quantity']
-        msg.state_machine.machine_name = self.machine_info['machineName']
-        msg.state_machine.time_noload = data_time[:self.machine_info['quantity']]
-        msg.state_machine.time_load = data_time[self.machine_info['quantity']:]
-        msg.state_machine.signal_light = data_signalLight
+        msg.state_machines.number_machine = self.machine_info['quantity']
+        msg.state_machines.machines_name = self.machine_info['machineName']
+        msg.state_machines.noload_time = data_time[:self.machine_info['quantity']]
+        msg.state_machines.underload_time = data_time[self.machine_info['quantity']:]
+        msg.state_machines.signal_light = data_signalLight
         self.pub_state_machine.publish(msg)
 
 def main(args=None):
