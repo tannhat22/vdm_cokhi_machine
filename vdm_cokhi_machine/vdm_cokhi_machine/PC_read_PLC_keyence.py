@@ -5,10 +5,8 @@ from rclpy.node import Node
 import sqlite3
 import os
 
-# from geometry_msgs.msg import Pose, PoseWithCovarianceStamped
-# from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, String
 from vdm_cokhi_machine_msgs.msg import StateMachinesStamped
-from vdm_cokhi_machine_msgs.srv import GetAllMachineName
 
 class PcReadPlc(Node):
     def __init__(self):
@@ -25,15 +23,12 @@ class PcReadPlc(Node):
 
         # Database path:
         self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
-        self.tableName = 'MACHINE'
-        self.create_table_db(self.tableName)
+        self.tableName = 'MACHINES'
         self.machine_info = self.get_all_machine_name_db()
-
-        # Ros Services:
-        self.getAllMachineName_srv = self.create_service(GetAllMachineName, 'get_all_machine_name', self.get_all_machine_name_cb)
 
         # Ros pub, sub:
         self.pub_state_machine = self.create_publisher(StateMachinesStamped, '/state_machines', 10)
+        self.sub_update_machines_table = self.create_subscription(Bool, '/update_machines_table',self.update_machines_table_cb)
 
         # self.bool_true = Bool()
         # self.bool_true.data = True
@@ -62,18 +57,6 @@ class PcReadPlc(Node):
             time.sleep(2)
             return False
 
-    def create_table_db(self, tableName):
-        try:
-            conn = sqlite3.connect(self.database_path)
-            print("Opened database successfully")
-            cur = conn.cursor()
-            cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
-            ''' (ID INT PRIMARY KEY     NOT NULL,
-                 NAME           TEXT    NOT NULL);''')
-        except Exception as e:
-            print(Exception)
-        return
-    
     def get_all_machine_name_db(self):
         try:
             conn = sqlite3.connect(self.database_path)
@@ -93,13 +76,12 @@ class PcReadPlc(Node):
         except Exception as e:
             print(Exception)
 
-    def get_all_machine_name_cb(self, request: GetAllMachineName.Request, respone: GetAllMachineName.Response):
-        if request.get_allname:
-            infoNames = self.get_all_machine_name_db()
-            respone.machines_quantity = infoNames['quantity']
-            respone.machines_name = infoNames['machineName']
-            return respone
-
+    def update_machines_table_cb(self, msg: Bool):
+        if msg.data:
+            self.machine_info = self.get_all_machine_name_db()
+            self.signalLight_bit_length = self.machine_info['quantity'] * 3
+            self.time_res_length = self.machine_info['quantity'] * 2
+        return
 
 
     #"Read bit. Ex: MR10 => deviceType: 'M', deviceNo: 100"
@@ -147,16 +129,15 @@ class PcReadPlc(Node):
         return dataReg
     
     #Decode bytes:
-    def decode_bytes(self,bytes_data):
-        byte_val = bytes(bytes_data)
-        data_formDEC = int.from_bytes(byte_val,'big',signed=True)
-        return data_formDEC
+    # def decode_bytes(self,bytes_data):
+    #     byte_val = bytes(bytes_data)
+    #     data_formDEC = int.from_bytes(byte_val,'big',signed=True)
+    #     return data_formDEC
     
     #M200-206
     def timer_callback(self):
         data_signalLight = self.read_bit('MR',self.signalLight_bit_start,'',self.signalLight_bit_length)
         data_time = self.read_register('DM',self.time_res_start,'',self.time_res_length)
-
 
         msg = StateMachinesStamped()
         msg.header.stamp = self.get_clock().now().to_msg()

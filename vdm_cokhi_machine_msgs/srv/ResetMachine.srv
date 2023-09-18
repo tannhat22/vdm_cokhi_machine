@@ -1,0 +1,4 @@
+int32 id_machine
+string password
+---
+bool success
