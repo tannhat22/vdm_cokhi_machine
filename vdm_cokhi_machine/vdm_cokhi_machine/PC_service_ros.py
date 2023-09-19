@@ -3,15 +3,15 @@ import socket
 import rclpy
 from rclpy.node import Node
 import sqlite3
-import os
+import math
 
-from std_msgs.msg import Bool, String
-from vdm_cokhi_machine_msgs.msg import StateMachinesStamped
+from std_msgs.msg import Bool
+from vdm_cokhi_machine_msgs.msg import NoLoad, UnderLoad
 from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, ResetMachine
 
 class PcService(Node):
     def __init__(self):
-        super().__init__('PC_read_PLC')
+        super().__init__('PC_service_ros')
 
         self.IP_addres_PLC = '192.168.0.11'
         self.port_addres_PLC = 8501
@@ -51,10 +51,10 @@ class PcService(Node):
         self.reset_machine_bit = ['MR',1000,'.U',1]
         self.reset_machine_res = ['DM',1000,'.U',1]
 
-        self.data_machine_length = 40
-        self.data_machines_res = ['DM',1000,'.U',self.data_machine_length * self.machine_info['quantity']]
-        self.separate_machine = 10
-        self.data_machine_res_structure = {
+        self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
+        self.dataMachine_length = 40
+        self.separateMachine_res = 10
+        self.dataMachine_res_structure = {
             'signalLight': [1,0],
             'noload': [2,1],
             'underload': [2,3],
@@ -123,47 +123,57 @@ class PcService(Node):
     def delete_machine_db(self, id):
         return
 
-    def get_all_machine_name_cb(self, request: GetAllMachineName.Request, respone: GetAllMachineName.Response):
+    def get_all_machine_name_cb(self, request: GetAllMachineName.Request, response: GetAllMachineName.Response):
         if request.get_allname:
             infoNames = self.get_all_machine_name_db()
-            respone.machines_quantity = infoNames['quantity']
-            respone.machines_name = infoNames['machineName']
-            return respone
+            response.machines_quantity = infoNames['quantity']
+            response.machines_name = infoNames['machineName']
+            return response
 
     # Lấy dữ liệu của một máy dựa trên yêu cầu ID và số ngày cần lấy
-    def get_machine_data_cb(self, request: GetMachineData.Request, respone: GetMachineData.Response):
+    def get_machine_data_cb(self, request: GetMachineData.Request, response: GetMachineData.Response):
         # Lấy toàn bộ dữ liệu của máy theo ID từ PLC
-        startRes = self.data_machines_res[1] + (self.data_machine_length + self.separate_machine)*(request.id_machine - 1)
-        data = self.read_device(self.data_machines_res[0],
+        startRes = self.dataMachines_res[1] + (self.dataMachine_length + self.separateMachine_res)*(request.id_machine - 1)
+        data = self.read_device(self.dataMachines_res[0],
                                 startRes,
-                                self.data_machines_res[2],
-                                self.data_machine_length)
+                                self.dataMachines_res[2],
+                                self.dataMachine_length)
         
         #Lấy tổng số ngày đã lưu và lọc ngày dựa trên yêu cầu
-        total_days = data[self.data_machine_res_structure['totalDays'][1]]
+        total_days = data[self.dataMachine_res_structure['totalDays'][1]]
         daysFilter = 0
         if total_days > request.days:
             daysFilter = total_days - request.days
 
         dataDates = [
-            data[(self.data_machine_res_structure['days'][1] + daysFilter):(self.data_machine_res_structure['days'][1] + total_days)],
-            data[(self.data_machine_res_structure['months'][1] + daysFilter):(self.data_machine_res_structure['months'][1] + total_days)],
-            data[(self.data_machine_res_structure['years'][1] + + daysFilter):(self.data_machine_res_structure['years'][1] + total_days)],
+            data[(self.dataMachine_res_structure['days'][1] + daysFilter):(self.dataMachine_res_structure['days'][1] + total_days)],
+            data[(self.dataMachine_res_structure['months'][1] + daysFilter):(self.dataMachine_res_structure['months'][1] + total_days)],
+            data[(self.dataMachine_res_structure['years'][1] + + daysFilter):(self.dataMachine_res_structure['years'][1] + total_days)],
         ]
-
+        dataNoload = data[(self.dataMachine_res_structure['noloadHistory'][1] + daysFilter):(self.dataMachine_res_structure['noloadHistory'][1] + total_days)]
+        dataUnderload = data[(self.dataMachine_res_structure['underloadHistory'][1] + daysFilter):(self.dataMachine_res_structure['underloadHistory'][1] + total_days)]
+        
         # Chuẩn hóa dữ liệu cho client
         datesResp = []
+        noloadResp = []
+        underloadResp = []
         for i in range(0,total_days):
+            noload = NoLoad()
+            underload = UnderLoad()
             datesResp.append(
                 str(dataDates[0][i]) + '/' + str(dataDates[1][i]) + '/' + '20' +str(dataDates[2][i])
             )
-        noloadResp = data[(self.data_machine_res_structure['noloadHistory'][1] + daysFilter):(self.data_machine_res_structure['noloadHistory'][1] + total_days)]
-        underloadResp = data[(self.data_machine_res_structure['underloadHistory'][1] + daysFilter):(self.data_machine_res_structure['underloadHistory'][1] + total_days)]
+            noload.minutes = dataNoload[i] % 60
+            noload.hours = math.floor(dataNoload[i] / 60)
+            underload.minutes = dataUnderload[i] % 60
+            underload.hours = math.floor(dataUnderload[i] / 60)
+            noloadResp.append(noload)
+            underloadResp.append(underload)
 
-        respone.dates = datesResp
-        respone.noload_time = noloadResp
-        respone.underload_time = underloadResp
-        return respone
+        response.dates = datesResp
+        response.noload = noloadResp
+        response.underload = underloadResp
+        return response
 
     def reset_machine_cb(self, request: ResetMachine.Request, respone: ResetMachine.Response):
         if self.check_password(request.password):

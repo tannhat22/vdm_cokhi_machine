@@ -11,7 +11,10 @@ find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 set(msg_files
-  "msg/StateMachines.msg"
+  "msg/NoLoad.msg"
+  "msg/UnderLoad.msg"
+  "msg/ValueSetting.msg"
+  "msg/StateMachine.msg"
   "msg/StateMachinesStamped.msg"
 )
 

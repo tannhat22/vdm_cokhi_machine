@@ -1,3 +1,4 @@
 std_msgs/Header header 
 
-StateMachines state_machines
+int32 machines_quantity
+StateMachine[] state_machines

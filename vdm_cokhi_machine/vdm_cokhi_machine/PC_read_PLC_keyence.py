@@ -3,10 +3,10 @@ import socket
 import rclpy
 from rclpy.node import Node
 import sqlite3
-import os
+import math
 
-from std_msgs.msg import Bool, String
-from vdm_cokhi_machine_msgs.msg import StateMachinesStamped
+from std_msgs.msg import Bool
+from vdm_cokhi_machine_msgs.msg import StateMachine, StateMachinesStamped
 
 class PcReadPlc(Node):
     def __init__(self):
@@ -36,10 +36,22 @@ class PcReadPlc(Node):
         # self.bool_false = Bool()
         # self.bool_false.data = False
         
-        self.signalLight_bit_start = '1'
-        self.signalLight_bit_length = self.machine_info['quantity'] * 3
-        self.time_res_start = '1'
-        self.time_res_length = self.machine_info['quantity'] * 2
+        self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
+        self.dataMachine_length = 40
+        self.separateMachine = 10
+        self.dataMachine_res_structure = {
+            'signalLight': [1,0],
+            'noload': [1,1],
+            'underload': [1,2],
+            'valueSetting': [3,3],
+            'timeReachSpeed': [1,6],
+            'totalDays': [1,7],
+            'noloadHistory': [30,10],
+            'underloadHistory': [30,40],
+            'years': [30,70],
+            'months': [30,100],
+            'days': [30,130],
+        }
 
         timer_period = 0.2
         self.timer = self.create_timer(timer_period, self.timer_callback)
@@ -90,20 +102,20 @@ class PcReadPlc(Node):
     #         .D: Unsigned 32-bit DEC
     #         .L: Signed 32-bit DEC
     #         .H: 16-bit HEX
-    def read_bit(self,deviceType: str = 'R', deviceNo: str = '0', format: str = '', length: int = 1):
-        if length > 1:
-            device = 'RDS' + ' ' + deviceType + deviceNo + format + ' ' + str(length) + '\x0D'
-        else:
-            device = 'RD' + ' ' + deviceType + deviceNo + format + '\x0D' 
-        dataformat = device.encode()
-        self.soc.sendall(dataformat)
-        dataRecv = self.soc.recv(1024)
-        dataRecvDec = dataRecv.decode()
-        dataBit = dataRecvDec.split(' ')
-        dataBit[len(dataBit)-1] = dataBit[len(dataBit)-1][0]
-        for i in range (0,len(dataBit)):
-            dataBit[i] = int(dataBit[i])
-        return dataBit
+    # def read_bit(self,deviceType: str = 'R', deviceNo: str = '0', format: str = '', length: int = 1):
+    #     if length > 1:
+    #         device = 'RDS' + ' ' + deviceType + deviceNo + format + ' ' + str(length) + '\x0D'
+    #     else:
+    #         device = 'RD' + ' ' + deviceType + deviceNo + format + '\x0D' 
+    #     dataformat = device.encode()
+    #     self.soc.sendall(dataformat)
+    #     dataRecv = self.soc.recv(1024)
+    #     dataRecvDec = dataRecv.decode()
+    #     dataBit = dataRecvDec.split(' ')
+    #     dataBit[len(dataBit)-1] = dataBit[len(dataBit)-1][0]
+    #     for i in range (0,len(dataBit)):
+    #         dataBit[i] = int(dataBit[i])
+    #     return dataBit
 
 
     #"Read register:"
@@ -113,39 +125,85 @@ class PcReadPlc(Node):
     #         .D: Unsigned 32-bit DEC
     #         .L: Signed 32-bit DEC
     #         .H: 16-bit HEX
-    def read_register(self,deviceType: str = 'DM', deviceNo: str = '0', format: str = '', length: int = 1):
+    # def read_register(self,deviceType: str = 'DM', deviceNo: str = '0', format: str = '', length: int = 1):
+    #     if length > 1:
+    #         device = 'RDS' + ' ' + deviceType + deviceNo + format + ' ' + str(length) + '\x0D'
+    #     else:
+    #         device = 'RD' + ' ' + deviceType + deviceNo + format + '\x0D' 
+    #     dataformat = device.encode()
+    #     self.soc.sendall(dataformat)
+    #     dataRecv = self.soc.recv(1024)
+    #     dataRecvDec = dataRecv.decode()
+    #     dataReg = dataRecvDec.split(' ')
+    #     dataReg[len(dataReg)-1] = dataReg[len(dataReg)-1][:-2]
+    #     for i in range (0,len(dataReg)):
+    #         dataReg[i] = int(dataReg[i])
+    #     return dataReg
+    
+    #"------------Read device-------------"
+    # deviceType: 'DM'
+    # deviceNo: 100
+    # format: .U: Unsigned 16-bit DEC
+    #         .S: Signed 16-bit DEC
+    #         .D: Unsigned 32-bit DEC
+    #         .L: Signed 32-bit DEC
+    #         .H: 16-bit HEX
+    # length: 3
+    def read_device(self,deviceType: str = 'DM', deviceNo: int = 0, format: str = '', length: int = 1):
         if length > 1:
-            device = 'RDS' + ' ' + deviceType + deviceNo + format + ' ' + str(length) + '\x0D'
+            device = 'RDS' + ' ' + deviceType + str(deviceNo) + format + ' ' + str(length) + '\x0D'
         else:
-            device = 'RD' + ' ' + deviceType + deviceNo + format + '\x0D' 
+            device = 'RD' + ' ' + deviceType + str(deviceNo) + format + '\x0D' 
         dataformat = device.encode()
         self.soc.sendall(dataformat)
         dataRecv = self.soc.recv(1024)
         dataRecvDec = dataRecv.decode()
-        dataReg = dataRecvDec.split(' ')
-        dataReg[len(dataReg)-1] = dataReg[len(dataReg)-1][:-2]
-        for i in range (0,len(dataReg)):
-            dataReg[i] = int(dataReg[i])
-        return dataReg
-    
-    #Decode bytes:
-    # def decode_bytes(self,bytes_data):
-    #     byte_val = bytes(bytes_data)
-    #     data_formDEC = int.from_bytes(byte_val,'big',signed=True)
-    #     return data_formDEC
+        dataResp = dataRecvDec.split(' ')
+        dataResp[len(dataResp)-1] = dataResp[len(dataResp)-1][:-2]
+        for i in range (0,len(dataResp)):
+            dataResp[i] = int(dataResp[i])
+        return dataResp
     
     #M200-206
+    # self.dataMachine_res_structure = {
+    #         'signalLight': [1,0],
+    #         'noload': [1,1],
+    #         'underload': [1,2],
+    #         'valueSetting': [3,3],
+    #         'timeReachSpeed': [1,6],
+    #         'totalDays': [1,7],
+    #         'noloadHistory': [30,10],
+    #         'underloadHistory': [30,40],
+    #         'years': [30,70],
+    #         'months': [30,100],
+    #         'days': [30,130],
+    # }
     def timer_callback(self):
-        data_signalLight = self.read_bit('MR',self.signalLight_bit_start,'',self.signalLight_bit_length)
-        data_time = self.read_register('DM',self.time_res_start,'',self.time_res_length)
-
+        dataMachines = self.read_device(self.dataMachines_res[0],
+                                        self.dataMachines_res[1],
+                                        self.dataMachines_res[2],
+                                        self.dataMachines_res[4])
+        
+        state_machines = []
+        for i in range(0,self.machine_info['quantity']):
+            j = i * self.dataMachine_length
+            machineState = StateMachine()
+            machineState.name = self.machine_info['machineName'][i]
+            machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
+            machineState.noload.minutes = (dataMachines[j + self.dataMachine_res_structure['noload'][1]]) % 60
+            machineState.noload.hours = math.floor((dataMachines[j + self.dataMachine_res_structure['noload'][1]]) / 60)
+            machineState.underload.minutes = (dataMachines[j + self.dataMachine_res_structure['underload'][1]]) % 60
+            machineState.underload.hours = math.floor((dataMachines[j + self.dataMachine_res_structure['underload'][1]]) / 60)
+            machineState.value_setting.min = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1]]
+            machineState.value_setting.max = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 1]
+            machineState.value_setting.current = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 2]
+            machineState.time_reachspeed = dataMachines[j + self.dataMachine_res_structure['timeReachSpeed'][1]]
+            state_machines.append(machineState)
+        
         msg = StateMachinesStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.state_machines.number_machine = self.machine_info['quantity']
-        msg.state_machines.machines_name = self.machine_info['machineName']
-        msg.state_machines.noload_time = data_time[:self.machine_info['quantity']]
-        msg.state_machines.underload_time = data_time[self.machine_info['quantity']:]
-        msg.state_machines.signal_light = data_signalLight
+        msg.machines_quantity = self.machine_info['quantity']
+        msg.state_machines = state_machines
         self.pub_state_machine.publish(msg)
 
 def main(args=None):

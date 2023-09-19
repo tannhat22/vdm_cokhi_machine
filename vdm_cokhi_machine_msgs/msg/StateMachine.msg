@@ -1,0 +1,6 @@
+string name
+int32 signal_light
+NoLoad noload
+UnderLoad underload
+ValueSetting value_setting
+int32 time_reachspeed
