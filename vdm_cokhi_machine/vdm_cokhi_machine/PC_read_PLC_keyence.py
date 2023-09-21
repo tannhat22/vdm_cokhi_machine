@@ -11,7 +11,7 @@ from vdm_cokhi_machine_msgs.msg import StateMachine, StateMachinesStamped
 class PcReadPlc(Node):
     def __init__(self):
         super().__init__('PC_read_PLC')
-
+        print('nhat')
         self.IP_addres_PLC = '192.168.0.10'
         self.port_addres_PLC = 8501
 
