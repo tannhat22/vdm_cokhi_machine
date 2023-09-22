@@ -51,21 +51,27 @@ class PcService(Node):
         self.reset_machine_bit = ['MR',1000,'.U',1]
         self.reset_machine_res = ['DM',1000,'.U',1]
 
-        self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
-        self.dataMachine_length = 40
-        self.separateMachine_res = 10
-        self.dataMachine_res_structure = {
-            'signalLight': [1,0],
-            'noload': [2,1],
-            'underload': [2,3],
-            'valueSetting': [3,5],
-            'timeReachSpeed': [1,8],
-            'totalDays': [1,9],
-            'noloadHistory': [30,10],
-            'underloadHistory': [30,40],
-            'years': [30,70],
-            'months': [30,100],
-            'days': [30,130],
+        # self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
+        # self.dataMachine_length = 7
+        # self.separateMachine = 10
+        # self.dataMachine_res_structure = {
+        #     'signalLight': [1,0],
+        #     'noload': [1,1],
+        #     'underload': [1,2],
+        #     'valueSetting': [3,3],
+        #     'timeReachSpeed': [1,6],
+        # }
+
+        self.dataMachineHistory_res = ['EM',1000,'.U',self.dataMachineHistory_length]
+        self.dataMachineHistory_length = 151
+        self.separateMachineHistory = 10
+        self.dataMachineHistory_res_structure = {
+            'totalDays': [1,0],
+            'noload': [30,1],
+            'underload': [30,31],
+            'years': [30,61],
+            'months': [30,91],
+            'days': [30,121],
         }
 
         self.get_logger().info("is running!!!!!!!!!!")
@@ -133,25 +139,25 @@ class PcService(Node):
     # Lấy dữ liệu của một máy dựa trên yêu cầu ID và số ngày cần lấy
     def get_machine_data_cb(self, request: GetMachineData.Request, response: GetMachineData.Response):
         # Lấy toàn bộ dữ liệu của máy theo ID từ PLC
-        startRes = self.dataMachines_res[1] + (self.dataMachine_length + self.separateMachine_res)*(request.id_machine - 1)
-        data = self.read_device(self.dataMachines_res[0],
+        startRes = self.dataMachineHistory_res[1] + (self.dataMachineHistory_length + self.separateMachineHistory)*(request.id_machine - 1)
+        data = self.read_device(self.dataMachineHistory_res[0],
                                 startRes,
-                                self.dataMachines_res[2],
-                                self.dataMachine_length)
+                                self.dataMachineHistory_res[2],
+                                self.dataMachineHistory_length)
         
         #Lấy tổng số ngày đã lưu và lọc ngày dựa trên yêu cầu
-        total_days = data[self.dataMachine_res_structure['totalDays'][1]]
+        total_days = data[self.dataMachineHistory_res_structure['totalDays'][1]]
         daysFilter = 0
         if total_days > request.days:
             daysFilter = total_days - request.days
 
         dataDates = [
-            data[(self.dataMachine_res_structure['days'][1] + daysFilter):(self.dataMachine_res_structure['days'][1] + total_days)],
-            data[(self.dataMachine_res_structure['months'][1] + daysFilter):(self.dataMachine_res_structure['months'][1] + total_days)],
-            data[(self.dataMachine_res_structure['years'][1] + + daysFilter):(self.dataMachine_res_structure['years'][1] + total_days)],
+            data[(self.dataMachineHistory_res_structure['days'][1] + daysFilter):(self.dataMachineHistory_res_structure['days'][1] + total_days)],
+            data[(self.dataMachineHistory_res_structure['months'][1] + daysFilter):(self.dataMachineHistory_res_structure['months'][1] + total_days)],
+            data[(self.dataMachineHistory_res_structure['years'][1] + daysFilter):(self.dataMachineHistory_res_structure['years'][1] + total_days)],
         ]
-        dataNoload = data[(self.dataMachine_res_structure['noloadHistory'][1] + daysFilter):(self.dataMachine_res_structure['noloadHistory'][1] + total_days)]
-        dataUnderload = data[(self.dataMachine_res_structure['underloadHistory'][1] + daysFilter):(self.dataMachine_res_structure['underloadHistory'][1] + total_days)]
+        dataNoload = data[(self.dataMachineHistory_res_structure['noload'][1] + daysFilter):(self.dataMachineHistory_res_structure['noload'][1] + total_days)]
+        dataUnderload = data[(self.dataMachineHistory_res_structure['underload'][1] + daysFilter):(self.dataMachineHistory_res_structure['underload'][1] + total_days)]
         
         # Chuẩn hóa dữ liệu cho client
         datesResp = []

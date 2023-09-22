@@ -36,7 +36,7 @@ class PcReadPlc(Node):
         # self.bool_false.data = False
         
         self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
-        self.dataMachine_length = 40
+        self.dataMachine_length = 7
         self.separateMachine = 10
         self.dataMachine_res_structure = {
             'signalLight': [1,0],
@@ -44,12 +44,18 @@ class PcReadPlc(Node):
             'underload': [1,2],
             'valueSetting': [3,3],
             'timeReachSpeed': [1,6],
-            'totalDays': [1,7],
-            'noloadHistory': [30,10],
-            'underloadHistory': [30,40],
-            'years': [30,70],
-            'months': [30,100],
-            'days': [30,130],
+        }
+
+        self.dataMachineHistory_res = ['EM',1000,'.U',self.dataMachineHistory_length]
+        self.dataMachineHistory_length = 151
+        self.separateMachineHistory = 10
+        self.dataMachineHistory_res_structure = {
+            'totalDays': [1,0],
+            'noloadHistory': [30,1],
+            'underloadHistory': [30,31],
+            'years': [30,61],
+            'months': [30,91],
+            'days': [30,121],
         }
 
         timer_period = 0.2
@@ -181,11 +187,11 @@ class PcReadPlc(Node):
         dataMachines = self.read_device(self.dataMachines_res[0],
                                         self.dataMachines_res[1],
                                         self.dataMachines_res[2],
-                                        self.dataMachines_res[4])
+                                        self.dataMachines_res[3])
         
         state_machines = []
         for i in range(0,self.machine_info['quantity']):
-            j = i * self.dataMachine_length
+            j = i * (self.dataMachine_length + self.separateMachine)
             machineState = StateMachine()
             machineState.name = self.machine_info['machineName'][i]
             machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
