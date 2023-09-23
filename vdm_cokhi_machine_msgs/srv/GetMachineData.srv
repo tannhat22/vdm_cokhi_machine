@@ -2,5 +2,5 @@ int32 id_machine
 int32 days
 ---
 string[] dates
-NoLoad[] noload
-UnderLoad[] underload
+int32[] noload
+int32[] underload

@@ -22,6 +22,9 @@ set(srv_files
   "srv/GetAllMachineName.srv"
   "srv/GetMachineData.srv"
   "srv/ResetMachine.srv"
+  "srv/CreateMachine.srv"
+  "srv/UpdateMachine.srv"
+  "srv/DeleteMachine.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}

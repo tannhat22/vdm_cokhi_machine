@@ -6,8 +6,8 @@ import sqlite3
 import math
 
 from std_msgs.msg import Bool
-from vdm_cokhi_machine_msgs.msg import NoLoad, UnderLoad
-from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, ResetMachine
+# from vdm_cokhi_machine_msgs.msg import NoLoad, UnderLoad
+from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, ResetMachine, CreateMachine, UpdateMachine, DeleteMachine
 
 class PcService(Node):
     def __init__(self):
@@ -18,9 +18,9 @@ class PcService(Node):
 
         self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._is_connected = False
-        while self._is_connected == False:
-            self._is_connected = self.socket_connect(self.IP_addres_PLC, self.port_addres_PLC)
-        time.sleep(1.0)
+        # while self._is_connected == False:
+        #     self._is_connected = self.socket_connect(self.IP_addres_PLC, self.port_addres_PLC)
+        # time.sleep(1.0)
 
         # Database path:
         self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
@@ -32,6 +32,9 @@ class PcService(Node):
         self.getAllMachineName_srv = self.create_service(GetAllMachineName, 'get_all_machine_name', self.get_all_machine_name_cb)
         self.getMachineData_srv = self.create_service(GetMachineData, 'get_machine_data', self.get_machine_data_cb)
         self.resetMachine_srv = self.create_service(ResetMachine, 'reset_machine', self.reset_machine_cb)
+        self.createMachine_srv = self.create_service(CreateMachine, 'create_machine', self.create_machine_cb)
+        self.updateMachine_srv = self.create_service(UpdateMachine, 'update_machine', self.update_machine_cb)
+        self.deleteMachine_srv = self.create_service(DeleteMachine, 'delete_machine', self.delete_machine_cb)
 
         # Ros pub, sub:
         self.pub_update_machines_table = self.create_publisher(Bool, '/update_machines_table', 10)
@@ -62,8 +65,8 @@ class PcService(Node):
         #     'timeReachSpeed': [1,6],
         # }
 
-        self.dataMachineHistory_res = ['EM',1000,'.U',self.dataMachineHistory_length]
         self.dataMachineHistory_length = 151
+        self.dataMachineHistory_res = ['EM',1000,'.U',self.dataMachineHistory_length]
         self.separateMachineHistory = 10
         self.dataMachineHistory_res_structure = {
             'totalDays': [1,0],
@@ -96,6 +99,7 @@ class PcService(Node):
             cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
             ''' (ID INT PRIMARY KEY     NOT NULL,
                  NAME           TEXT    NOT NULL);''')
+            conn.close()
         except Exception as e:
             print(Exception)
         return
@@ -115,19 +119,53 @@ class PcService(Node):
                 result['machineName'].append(row[1]) 
                 num += 1
             result['quantity'] = num
-
+        
+            conn.close()
             return result
         except Exception as e:
-            print(Exception)
+            print(e)
 
-    def create_machine_db(self, id, days):
-        return
+    # Tạo thêm máy mới vào database
+    def create_machine_db(self, name):
+        try:
+            conn = sqlite3.connect(self.database_path)
+            cur = conn.cursor()
+            cur.execute("INSERT INTO " + self.tableName + " (NAME) VALUES (?)", (name,))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(e)
+            return False
     
-    def update_machine_db(self, id, days):
-        return
+    # Sửa machine trong database:
+    def update_machine_db(self, id, newName):
+        try:
+            conn = sqlite3.connect(self.database_path)
+            cur = conn.cursor()
+            cur.execute("UPDATE " + self.tableName + " SET NAME = ? WHERE ID = ?", (newName, id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(e)
+            return False
 
+    # Xóa machine trong database
     def delete_machine_db(self, id):
-        return
+        try:
+            conn = sqlite3.connect(self.database_path)
+            cur = conn.cursor()
+            cur.execute("DELETE FROM " + self.tableName + " WHERE ID = ?", (id))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(e)
+            return False
 
     def get_all_machine_name_cb(self, request: GetAllMachineName.Request, response: GetAllMachineName.Response):
         if request.get_allname:
@@ -164,15 +202,11 @@ class PcService(Node):
         noloadResp = []
         underloadResp = []
         for i in range(0,total_days):
-            noload = NoLoad()
-            underload = UnderLoad()
             datesResp.append(
                 str(dataDates[0][i]) + '/' + str(dataDates[1][i]) + '/' + '20' +str(dataDates[2][i])
             )
-            noload.minutes = dataNoload[i] % 60
-            noload.hours = math.floor(dataNoload[i] / 60)
-            underload.minutes = dataUnderload[i] % 60
-            underload.hours = math.floor(dataUnderload[i] / 60)
+            noload = dataNoload[i]
+            underload = dataUnderload[i]
             noloadResp.append(noload)
             underloadResp.append(underload)
 
@@ -181,7 +215,7 @@ class PcService(Node):
         response.underload = underloadResp
         return response
 
-    def reset_machine_cb(self, request: ResetMachine.Request, respone: ResetMachine.Response):
+    def reset_machine_cb(self, request: ResetMachine.Request, response: ResetMachine.Response):
         if self.check_password(request.password):
             if self.write_device(self.reset_machine_res[0],
                                 self.reset_machine_res[1],
@@ -198,12 +232,40 @@ class PcService(Node):
                                         self.reset_machine_bit[2],
                                         self.reset_machine_bit[3],
                                         [1]):
-                        respone.success = True
-                        return respone
-        respone.success = False
-        return respone
+                        response.success = True
+                        return response
+        response.success = False
+        return response
+
+    def create_machine_cb(self, resquest: CreateMachine.Request, response: CreateMachine.Response):
+        if self.check_password(resquest.password):
+            if self.create_machine_db(resquest.name):
+                response.success = True
+                return response
+
+        response.success = False
+        return response
+
+    def update_machine_cb(self, resquest: UpdateMachine.Request, response: UpdateMachine.Response):
+        if self.check_password(resquest.password):
+            if self.update_machine_db(resquest.id_machine, resquest.new_name):
+                response.success = True
+                return response
+
+        response.success = False
+        return response
+
+    def delete_machine_cb(self, resquest: DeleteMachine.Request, response: DeleteMachine.Response):
+        if self.check_password(resquest.password):
+            if self.delete_machine_db(resquest.id_machine):
+                response.success = True
+                return response
+
+        response.success = False
+        return response
 
     def check_password(self, passwordCheck):
+        return True
         password = self.read_device(self.password_read_res[0],
                                     self.password_read_res[1],
                                     self.password_read_res[2],
@@ -274,6 +336,7 @@ class PcService(Node):
 def main(args=None):
     rclpy.init(args=args)
     pc_service = PcService()
+    pc_service.create_machine_db('test thu')
     rclpy.spin(pc_service)
 
     # Destroy the node explicitly

@@ -35,8 +35,8 @@ class PcReadPlc(Node):
         # self.bool_false = Bool()
         # self.bool_false.data = False
         
-        self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
         self.dataMachine_length = 7
+        self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
         self.separateMachine = 10
         self.dataMachine_res_structure = {
             'signalLight': [1,0],
@@ -46,8 +46,8 @@ class PcReadPlc(Node):
             'timeReachSpeed': [1,6],
         }
 
-        self.dataMachineHistory_res = ['EM',1000,'.U',self.dataMachineHistory_length]
         self.dataMachineHistory_length = 151
+        self.dataMachineHistory_res = ['EM',1000,'.U',self.dataMachineHistory_length]
         self.separateMachineHistory = 10
         self.dataMachineHistory_res_structure = {
             'totalDays': [1,0],
@@ -195,10 +195,8 @@ class PcReadPlc(Node):
             machineState = StateMachine()
             machineState.name = self.machine_info['machineName'][i]
             machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
-            machineState.noload.minutes = (dataMachines[j + self.dataMachine_res_structure['noload'][1]]) % 60
-            machineState.noload.hours = math.floor((dataMachines[j + self.dataMachine_res_structure['noload'][1]]) / 60)
-            machineState.underload.minutes = (dataMachines[j + self.dataMachine_res_structure['underload'][1]]) % 60
-            machineState.underload.hours = math.floor((dataMachines[j + self.dataMachine_res_structure['underload'][1]]) / 60)
+            machineState.noload = (dataMachines[j + self.dataMachine_res_structure['noload'][1]])
+            machineState.underload = (dataMachines[j + self.dataMachine_res_structure['underload'][1]])
             machineState.value_setting.min = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1]]
             machineState.value_setting.max = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 1]
             machineState.value_setting.current = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 2]

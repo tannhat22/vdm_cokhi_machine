@@ -1,4 +1,5 @@
 string password
 int32 id_machine
+string new_name
 ---
 bool success

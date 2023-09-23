@@ -1,4 +1,4 @@
 string password
-int32 id_machine
+string name
 ---
 bool success
