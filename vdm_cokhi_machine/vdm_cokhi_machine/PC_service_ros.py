@@ -97,7 +97,7 @@ class PcService(Node):
             print("Opened database successfully")
             cur = conn.cursor()
             cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
-            ''' (ID INT PRIMARY KEY     NOT NULL,
+            ''' (ID INTEGER PRIMARY KEY     NOT NULL,
                  NAME           TEXT    NOT NULL);''')
             conn.close()
         except Exception as e:
@@ -158,7 +158,7 @@ class PcService(Node):
         try:
             conn = sqlite3.connect(self.database_path)
             cur = conn.cursor()
-            cur.execute("DELETE FROM " + self.tableName + " WHERE ID = ?", (id))
+            cur.execute("DELETE FROM " + self.tableName + " WHERE ID = ?", (id,))
             
             conn.commit()
             conn.close()
@@ -237,27 +237,30 @@ class PcService(Node):
         response.success = False
         return response
 
-    def create_machine_cb(self, resquest: CreateMachine.Request, response: CreateMachine.Response):
-        if self.check_password(resquest.password):
-            if self.create_machine_db(resquest.name):
+    def create_machine_cb(self, request: CreateMachine.Request, response: CreateMachine.Response):
+        if self.check_password(request.password):
+            if self.create_machine_db(request.name):
+                self.pub_update_machines_table.publish(self.bool_true)
                 response.success = True
                 return response
 
         response.success = False
         return response
 
-    def update_machine_cb(self, resquest: UpdateMachine.Request, response: UpdateMachine.Response):
-        if self.check_password(resquest.password):
-            if self.update_machine_db(resquest.id_machine, resquest.new_name):
+    def update_machine_cb(self, request: UpdateMachine.Request, response: UpdateMachine.Response):
+        if self.check_password(request.password):
+            if self.update_machine_db(request.id_machine, request.new_name):
+                self.pub_update_machines_table.publish(self.bool_true)
                 response.success = True
                 return response
 
         response.success = False
         return response
 
-    def delete_machine_cb(self, resquest: DeleteMachine.Request, response: DeleteMachine.Response):
-        if self.check_password(resquest.password):
-            if self.delete_machine_db(resquest.id_machine):
+    def delete_machine_cb(self, request: DeleteMachine.Request, response: DeleteMachine.Response):
+        if self.check_password(request.password):
+            if self.delete_machine_db(request.id_machine):
+                self.pub_update_machines_table.publish(self.bool_true)
                 response.success = True
                 return response
 
@@ -336,7 +339,7 @@ class PcService(Node):
 def main(args=None):
     rclpy.init(args=args)
     pc_service = PcService()
-    pc_service.create_machine_db('test thu')
+    pc_service.delete_machine_db(2)
     rclpy.spin(pc_service)
 
     # Destroy the node explicitly

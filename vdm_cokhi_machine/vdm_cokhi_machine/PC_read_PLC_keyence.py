@@ -16,9 +16,9 @@ class PcReadPlc(Node):
 
         self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._is_connected = False
-        while self._is_connected == False:
-            self._is_connected = self.socket_connect(self.IP_addres_PLC, self.port_addres_PLC)
-        time.sleep(1.0)
+        # while self._is_connected == False:
+        #     self._is_connected = self.socket_connect(self.IP_addres_PLC, self.port_addres_PLC)
+        # time.sleep(1.0)
 
         # Database path:
         self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
@@ -27,7 +27,7 @@ class PcReadPlc(Node):
 
         # Ros pub, sub:
         self.pub_state_machine = self.create_publisher(StateMachinesStamped, '/state_machines', 10)
-        self.sub_update_machines_table = self.create_subscription(Bool, '/update_machines_table',self.update_machines_table_cb)
+        self.sub_update_machines_table = self.create_subscription(Bool, '/update_machines_table',self.update_machines_table_cb, 10)
 
         # self.bool_true = Bool()
         # self.bool_true.data = True
@@ -59,7 +59,7 @@ class PcReadPlc(Node):
         }
 
         timer_period = 0.2
-        self.timer = self.create_timer(timer_period, self.timer_callback)
+        # self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
 
 
