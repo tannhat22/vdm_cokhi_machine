@@ -2,3 +2,4 @@ string password
 string name
 ---
 bool success
+string status

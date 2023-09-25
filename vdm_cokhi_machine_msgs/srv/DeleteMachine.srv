@@ -2,3 +2,4 @@ string password
 int32 id_machine
 ---
 bool success
+string status

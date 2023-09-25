@@ -16,9 +16,9 @@ class PcReadPlc(Node):
 
         self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._is_connected = False
-        # while self._is_connected == False:
-        #     self._is_connected = self.socket_connect(self.IP_addres_PLC, self.port_addres_PLC)
-        # time.sleep(1.0)
+        while self._is_connected == False:
+            self._is_connected = self.socket_connect(self.IP_addres_PLC, self.port_addres_PLC)
+        time.sleep(1.0)
 
         # Database path:
         self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
@@ -27,6 +27,7 @@ class PcReadPlc(Node):
 
         # Ros pub, sub:
         self.pub_state_machine = self.create_publisher(StateMachinesStamped, '/state_machines', 10)
+
         self.sub_update_machines_table = self.create_subscription(Bool, '/update_machines_table',self.update_machines_table_cb, 10)
 
         # self.bool_true = Bool()
@@ -59,7 +60,7 @@ class PcReadPlc(Node):
         }
 
         timer_period = 0.2
-        # self.timer = self.create_timer(timer_period, self.timer_callback)
+        self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
 
 
@@ -82,22 +83,24 @@ class PcReadPlc(Node):
             num = 0
             result = {
                 'quantity': 0,
-                'machineName': []
+                'machineName': [],
+                'idMachines': []
             }
             for row in cur:
+                result['idMachines'].append(row[0])
                 result['machineName'].append(row[1]) 
                 num += 1
             result['quantity'] = num
-
+        
+            conn.close()
             return result
         except Exception as e:
-            print(Exception)
+            print(e)
+            return False
 
     def update_machines_table_cb(self, msg: Bool):
         if msg.data:
             self.machine_info = self.get_all_machine_name_db()
-            self.signalLight_bit_length = self.machine_info['quantity'] * 3
-            self.time_res_length = self.machine_info['quantity'] * 2
         return
 
 
@@ -169,21 +172,10 @@ class PcReadPlc(Node):
             dataResp[i] = int(dataResp[i])
         return dataResp
     
-    #M200-206
-    # self.dataMachine_res_structure = {
-    #         'signalLight': [1,0],
-    #         'noload': [1,1],
-    #         'underload': [1,2],
-    #         'valueSetting': [3,3],
-    #         'timeReachSpeed': [1,6],
-    #         'totalDays': [1,7],
-    #         'noloadHistory': [30,10],
-    #         'underloadHistory': [30,40],
-    #         'years': [30,70],
-    #         'months': [30,100],
-    #         'days': [30,130],
-    # }
+    
     def timer_callback(self):
+        if not self.machine_info: return
+        
         dataMachines = self.read_device(self.dataMachines_res[0],
                                         self.dataMachines_res[1],
                                         self.dataMachines_res[2],
@@ -206,6 +198,7 @@ class PcReadPlc(Node):
         msg = StateMachinesStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.machines_quantity = self.machine_info['quantity']
+        msg.id_machines = self.machine_info['idMachines']
         msg.state_machines = state_machines
         self.pub_state_machine.publish(msg)
 

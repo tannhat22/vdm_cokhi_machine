@@ -1,4 +1,7 @@
 bool get_allname
 ---
+bool success
+string status
 int32 machines_quantity
+int32[] id_machines
 string[] machines_name
