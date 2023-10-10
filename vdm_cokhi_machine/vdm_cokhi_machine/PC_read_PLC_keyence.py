@@ -101,6 +101,7 @@ class PcReadPlc(Node):
     def update_machines_table_cb(self, msg: Bool):
         if msg.data:
             self.machine_info = self.get_all_machine_name_db()
+            self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
         return
 
 

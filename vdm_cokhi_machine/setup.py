@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'pc_read_plc_keyence = vdm_cokhi_machine.PC_read_PLC_keyence:main',
             'pc_service_ros = vdm_cokhi_machine.PC_service_ros:main',
+            'plc_service_ros = vdm_cokhi_machine.PLC_keyence_service_ros:main'
         ],
     },
 )
