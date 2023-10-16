@@ -3,9 +3,8 @@ import socket
 import rclpy
 from rclpy.node import Node
 import sqlite3
-import math
+import datetime
 
-from std_msgs.msg import Bool
 from vdm_cokhi_machine_msgs.msg import StateMachine, StateMachinesStamped
 from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, ResetMachine
 from vdm_cokhi_machine_msgs.srv import CreateMachine, UpdateMachine, DeleteMachine
@@ -14,8 +13,10 @@ from vdm_cokhi_machine_msgs.srv import CreateMachine, UpdateMachine, DeleteMachi
 class PlcService(Node):
     def __init__(self):
         super().__init__('PLC_service_ros')
-        self.IP_addres_PLC = '192.168.0.10'
+        # Cấu hình các thông số quan trọng:
+        self.IP_addres_PLC = '192.168.1.1'
         self.port_addres_PLC = 8501
+        self.maximumDates = 365
 
         self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._is_connected = False
@@ -45,37 +46,38 @@ class PlcService(Node):
 
         #------ Address all device -------:
         ## System data:
-        self.clock_red_res = ['CM',700,'.U']
+        ## Clock resgister:
+            # year(0-99):       CM700
+            # month(1-12):      CM701
+            # day(1-31):        CM702
+            # hour(0-23):       CM703
+            # minute(0-59):     CM704
+            # second(0-59):     CM705
+            # day-of-week(0-6): CM706 (0: sunday, 1: monday, 2: tuesday, 3: wednesday, 4: thursday, 5: friday, 6: saturday)    
+        self.clock_res = ['CM',700,'.U',7]
 
-        self.password_read_res = ['DM',1000,'.U',1]
-        self.password_write_res = ['DM',1000,'.U',1]
+        self.save_data_bit = ['MR',202,'.U',1]
 
+        self.password = '10064'
+        self.password_write_res = ['DM',500,'.U',1]
+
+        self.reset_bit = ['MR',200,'.U',1]
         self.reset_machine_bit = ['MR',1000,'.U',1]
-        self.reset_machine_res = ['DM',1000,'.U',1]
+        self.max_bit_reset = 15
+        self.reset_change_bit = ['MR',1100, '.U',1]
+        self.reset_separate = 0
+        # self.reset_machine_res = ['DM',0,'.U',1]
 
         ## Realtime data:
-        self.dataMachine_length = 7
-        self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
-        self.separateMachine = 10
+        self.dataMachine_length = 3
+        self.separateMachine = 7
+        self.dataMachines_res = ['DM',1017,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
         self.dataMachine_res_structure = {
             'signalLight': [1,0],
             'noload': [1,1],
             'underload': [1,2],
-            'valueSetting': [3,3],
-            'timeReachSpeed': [1,6],
-        }
-
-        ## History data:
-        self.dataMachineHistory_length = 151
-        self.dataMachineHistory_res = ['EM',1000,'.U',self.dataMachineHistory_length]
-        self.separateMachineHistory = 10
-        self.dataMachineHistory_res_structure = {
-            'totalDays': [1,0],
-            'noloadHistory': [30,1],
-            'underloadHistory': [30,31],
-            'years': [30,61],
-            'months': [30,91],
-            'days': [30,121],
+            # 'valueSetting': [3,3],
+            # 'timeReachSpeed': [1,6],
         }
 
         # Status for response services:
@@ -112,6 +114,24 @@ class PlcService(Node):
             self.cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
             ''' (ID INTEGER PRIMARY KEY     NOT NULL,
                  NAME           TEXT    NOT NULL);''')
+            
+            self.cur.execute("SELECT * from " + self.tableName)
+            rows = self.cur.fetchall()
+            if len(rows) > 0:
+                for row in rows:
+                    self.create_table_machine_history_db(row[1])
+        except Exception as e:
+            print(Exception)
+        return
+    
+    # Tạo bảng database history cho máy được cài đặt nếu chưa có:
+    def create_table_machine_history_db(self, tableName):
+        try:
+            self.cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
+            ''' (ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                 DATE TIMESTAMP NOT NULL,
+                 NOLOAD INTEGER NOT NULL,
+                 UNDERLOAD INTEGER NOT NULL);''')
         except Exception as e:
             print(Exception)
         return
@@ -120,41 +140,117 @@ class PlcService(Node):
     def get_all_machine_name_db(self):
         try:
             self.cur.execute("SELECT * from " + self.tableName)
-            num = 0
+            rows = self.cur.fetchall()
+            # num = 0
             result = {
                 'quantity': 0,
                 'machineName': [],
                 'idMachines': []
             }
-            for row in self.cur:
+            for row in rows:
+                result['quantity'] += 1
                 result['idMachines'].append(row[0])
                 result['machineName'].append(row[1]) 
-                num += 1
-            result['quantity'] = num
-        
+                # num += 1
+            # result['quantity'] = num
             return result
         except Exception as e:
             print(e)
             return False
+    
+    def get_machine_name_db(self, id):
+        try:
+            self.cur.execute("SELECT NAME FROM " + self.tableName + " WHERE ID = ?",(id,))
+            machineName = self.cur.fetchone()[0]
+            return machineName
+        except Exception as e:
+            print(e)
+            self.get_logger().info(f'Exeption: {e}')
+            return False
+
+    # Lấy dữ liệu theo ngày của một máy từ database
+    def get_history_machine_db(self, tableName):
+        try:
+            # self.get_logger().info(f'machine name: {tableName}')
+            self.cur.execute("SELECT * from " + tableName)
+            rows = self.cur.fetchall()
+            result = {
+                'totalDays': 0,
+                'dates': [],
+                'noload': [],
+                'underload': []
+            }
+            for row in rows:
+                result['totalDays'] +=1
+                result['dates'].append(row[1])
+                # result['dates'].append(row[1].date().strftime("%m/%d/%Y"))
+                result['noload'].append(row[2]) 
+                result['underload'].append(row[3]) 
+
+            return result
+        except Exception as e:
+            self.get_logger().info(f'{e}')
+            return False
 
     # Tạo thêm máy mới vào database
-    def create_machine_db(self, name):
+    def add_machine_db(self, name):
         try:
             self.cur.execute("INSERT INTO " + self.tableName + " (NAME) VALUES (?)", (name,))
-            
+            self.create_table_machine_history_db(name)
             self.conn.commit()
             return True
         except Exception as e:
             print(e)
             return False
     
+    # Thêm dữ liệu ngày mới vào bảng database:
+    def add_history_data_db(self, tableName, date, noLoad, underLoad):
+        try:
+            self.cur.execute("SELECT * from " + tableName)
+            totalDates = len(self.cur.fetchall())
+            if totalDates >= self.maximumDates:
+                self.cur.execute("DELETE FROM " + tableName + " WHERE ID = 1")
+                self.cur.execute("CREATE TABLE momenttable AS SELECT * FROM " + tableName)
+                self.cur.execute("DELETE FROM " + tableName)
+                self.cur.execute("DELETE FROM sqlite_sequence WHERE name='" + tableName + "'")
+                self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD) SELECT DATE, NOLOAD, UNDERLOAD FROM momenttable")
+                self.delete_table("momenttable")
+                self.conn.commit()
+            
+            self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD) VALUES (?, ?, ?)", (date, noLoad, underLoad))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(e)
+            return False
+
+    # Sửa tên bảng trong database:
+    def update_table_name(self, tableOldName, tableNewName):
+        try:
+            self.cur.execute("ALTER TABLE " + tableOldName + " RENAME TO " + tableNewName)
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(e)
+            return False
+
     # Sửa machine trong database:
     def update_machine_db(self, id, newName):
         try:
-            self.cur.execute("UPDATE " + self.tableName + " SET NAME = ? WHERE ID = ?", (newName, id))
-            
-            self.conn.commit()
-            return True
+            machineName = self.get_machine_name_db(id)
+            if self.update_table_name(machineName, newName):
+                self.cur.execute("UPDATE " + self.tableName + " SET NAME = ? WHERE ID = ?", (newName, id))
+                self.conn.commit()
+                return True
+            return False
+        except Exception as e:
+            print(e)
+            return False
+
+    # Xóa bảng database:
+    def delete_table(self, tableName):
+        try:
+            self.cur.execute("DROP TABLE IF EXISTS " + tableName)
         except Exception as e:
             print(e)
             return False
@@ -162,13 +258,15 @@ class PlcService(Node):
     # Xóa machine trong database
     def delete_machine_db(self, id):
         try:
-            self.cur.execute("DELETE FROM " + self.tableName + " WHERE ID = ?", (id,))
-            
-            self.conn.commit()
-            return True
+            machineName = self.get_machine_name_db(id)
+            if self.delete_table(machineName):
+                self.cur.execute("DELETE FROM " + self.tableName + " WHERE ID = ?", (id,))
+                self.conn.commit()
+                return True
+            return False
         except Exception as e:
             print(e)
-            return False
+            return False  
 
     # Kiểm tra tên machine có tồn tại trong database:
     def checkNameIsExists(self,name):
@@ -200,82 +298,53 @@ class PlcService(Node):
 
     # Lấy dữ liệu của một máy dựa trên yêu cầu ID và số ngày cần lấy
     def get_machine_data_cb(self, request: GetMachineData.Request, response: GetMachineData.Response):
-        # Lấy toàn bộ dữ liệu của máy theo ID từ PLC
         if not self.machine_info:
             response.success = False
             response.status = self.status['dbErr']
             return response
-
-        try:
-            indexMachine = self.machine_info['idMachines'].index(request.id_machine)
-        except Exception as e:
-            print(e)
-            response.success = False
-            response.status = self.status['notFound']
+        
+        # Lấy dữ liệu ngày từ database:
+        machineName = self.get_machine_name_db(request.id_machine)
+        dataHistory = self.get_history_machine_db(machineName)
+        if not dataHistory: 
             return response
-        
-        startRes = self.dataMachineHistory_res[1] + (self.dataMachineHistory_length + self.separateMachineHistory)*(indexMachine)
-        data = self.read_device(self.dataMachineHistory_res[0],
-                                startRes,
-                                self.dataMachineHistory_res[2],
-                                self.dataMachineHistory_length)
-        
-        if not data:
-            response.success = False
-            response.status = self.status['socketErr']
-            return response
-        
-        #Lấy tổng số ngày đã lưu và lọc ngày dựa trên yêu cầu
-        total_days = data[self.dataMachineHistory_res_structure['totalDays'][1]]
-        daysFilter = 0
-        if total_days > request.days:
-            daysFilter = total_days - request.days
 
-        dataDates = [
-            data[(self.dataMachineHistory_res_structure['days'][1] + daysFilter):(self.dataMachineHistory_res_structure['days'][1] + total_days)],
-            data[(self.dataMachineHistory_res_structure['months'][1] + daysFilter):(self.dataMachineHistory_res_structure['months'][1] + total_days)],
-            data[(self.dataMachineHistory_res_structure['years'][1] + daysFilter):(self.dataMachineHistory_res_structure['years'][1] + total_days)],
-        ]
-        dataNoload = data[(self.dataMachineHistory_res_structure['noload'][1] + daysFilter):(self.dataMachineHistory_res_structure['noload'][1] + total_days)]
-        dataUnderload = data[(self.dataMachineHistory_res_structure['underload'][1] + daysFilter):(self.dataMachineHistory_res_structure['underload'][1] + total_days)]
+        # Lấy tổng số ngày đã lưu và lọc ngày dựa trên yêu cầu
+        i = 0
+        if (dataHistory['totalDays'] > request.days):
+            i = request.days
         
-        # Chuẩn hóa dữ liệu cho client
-        datesResp = []
-        noloadResp = []
-        underloadResp = []
-        for i in range(0,total_days):
-            datesResp.append(
-                str(dataDates[0][i]) + '/' + str(dataDates[1][i]) + '/' + '20' +str(dataDates[2][i])
-            )
-            noload = dataNoload[i]
-            underload = dataUnderload[i]
-            noloadResp.append(noload)
-            underloadResp.append(underload)
-
         response.success = True
         response.status = self.status['success']
-        response.dates = datesResp
-        response.noload = noloadResp
-        response.underload = underloadResp
+        response.dates = dataHistory['dates'][i:]
+        response.noload = dataHistory['noload'][i:]
+        response.underload = dataHistory['underload'][i:]
+
+        
+
         return response
 
     def reset_machine_cb(self, request: ResetMachine.Request, response: ResetMachine.Response):
+        self.get_logger().info(f'Reset machine: {request.id_machine}')
+        # response.success = True
+        # return response 
         if self.check_password(request.password):
             indexMachine = self.machine_info['idMachines'].index(request.id_machine)
-            if (self.write_device(self.reset_machine_res[0],
-                                self.reset_machine_res[1],
-                                self.reset_machine_res[2],
-                                self.reset_machine_res[3],
-                                [indexMachine]) and
+
+            if (self.write_device(self.reset_machine_bit[0],
+                                self.reset_machine_bit[1] + indexMachine + self.reset_separate,
+                                self.reset_machine_bit[2],
+                                self.reset_machine_bit[3],
+                                [1]) and
                 self.write_device(self.password_write_res[0],
                                 self.password_write_res[1],
                                 self.password_write_res[2],
                                 self.password_write_res[3],
                                 [request.password]) and
-                self.write_device(self.reset_machine_bit[0],
-                                self.reset_machine_bit[1],
-                                self.reset_machine_bit[2],
-                                self.reset_machine_bit[3],
+                self.write_device(self.reset_bit[0],
+                                self.reset_bit[1],
+                                self.reset_bit[2],
+                                self.reset_bit[3],
                                 [1])):
                 response.success = True
                 return response
@@ -297,7 +366,7 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['nameInuse']
 
-            elif not self.create_machine_db(request.name):
+            elif not self.add_machine_db(request.name):
                 response.success = False
                 response.status = self.status['dbErr']
             
@@ -353,18 +422,34 @@ class PlcService(Node):
         return response
 
     def check_password(self, passwordCheck):
-        password = self.read_device(self.password_read_res[0],
-                                    self.password_read_res[1],
-                                    self.password_read_res[2],
-                                    self.password_read_res[3])[0]
-        if password == passwordCheck:
+        if passwordCheck == self.password:
             return True
         return False
 
     def update_machineInfo(self):
         self.machine_info = self.get_all_machine_name_db()
-        self.dataMachines_res = ['DM',1000,'.U',self.dataMachine_length * self.machine_info['quantity']]
+        self.dataMachines_res = ['DM',1000,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
         return
+    
+    def handleSaveData(self,data):
+        dataClock = self.read_device(self.clock_res[0],
+                                     self.clock_res[1],
+                                     self.clock_res[2],
+                                     self.clock_res[3])
+
+        date = datetime.datetime(2000 + dataClock[0],dataClock[1],dataClock[2],dataClock[3],dataClock[4],dataClock[5])
+
+        for i in range(0,self.machine_info['quantity']):
+            j = i * (self.dataMachine_length + self.separateMachine)
+            name = self.machine_info['machineName'][i]
+            noload = data[j + self.dataMachine_res_structure['noload'][1]]
+            underload = data[j + self.dataMachine_res_structure['underload'][1]]
+            if not self.add_history_data_db(name,date,noload,underload):
+                self.get_logger().info("ERROR: Save data of day error!!!")
+                return False
+        
+        self.get_logger().info("Save data of day success!")
+        return True
     
 
     #"------------Read device-------------"
@@ -427,7 +512,7 @@ class PlcService(Node):
             dataResp = dataRecvDec.split(' ')
             dataResp[len(dataResp)-1] = dataResp[len(dataResp)-1][:-2]
             
-            if (dataResp[0] + dataResp[1] == 'OK'):
+            if (dataResp[0]== 'OK'):
                 return True
             return False
         except Exception as e:
@@ -437,11 +522,23 @@ class PlcService(Node):
     
     def timer_callback(self):
         if not self.machine_info: return
-        
+
+        saveDataBit = self.read_device(self.save_data_bit[0],
+                                      self.save_data_bit[1],
+                                      self.save_data_bit[2],
+                                      self.save_data_bit[3])[0]
+
         dataMachines = self.read_device(self.dataMachines_res[0],
                                         self.dataMachines_res[1],
                                         self.dataMachines_res[2],
                                         self.dataMachines_res[3])
+        
+        if saveDataBit:
+            self.handleSaveData(dataMachines)
+            self.write_device(self.save_data_bit[0],
+                              self.save_data_bit[1],
+                              self.save_data_bit[2],
+                              self.save_data_bit[3],[0])
         
         state_machines = []
         for i in range(0,self.machine_info['quantity']):
@@ -451,10 +548,10 @@ class PlcService(Node):
             machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
             machineState.noload = (dataMachines[j + self.dataMachine_res_structure['noload'][1]])
             machineState.underload = (dataMachines[j + self.dataMachine_res_structure['underload'][1]])
-            machineState.value_setting.min = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1]]
-            machineState.value_setting.max = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 1]
-            machineState.value_setting.current = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 2]
-            machineState.time_reachspeed = dataMachines[j + self.dataMachine_res_structure['timeReachSpeed'][1]]
+            # machineState.value_setting.min = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1]]
+            # machineState.value_setting.max = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 1]
+            # machineState.value_setting.current = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 2]
+            # machineState.time_reachspeed = dataMachines[j + self.dataMachine_res_structure['timeReachSpeed'][1]]
             state_machines.append(machineState)
         
         msg = StateMachinesStamped()

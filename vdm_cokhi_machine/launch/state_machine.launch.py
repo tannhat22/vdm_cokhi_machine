@@ -17,17 +17,25 @@ def generate_launch_description():
     	    XMLLaunchDescriptionSource(os.path.join(launch_dir, 'rosbridge_websocket_launch.xml'))),
 
         # Run node
-        Node(
-            package='vdm_cokhi_machine',
-            namespace='',
-            executable='pc_read_plc_keyence',
-            name='pc_read_plc_keyence'
-        ),
+        # Node(
+        #     package='vdm_cokhi_machine',
+        #     namespace='',
+        #     executable='pc_read_plc_keyence',
+        #     name='pc_read_plc_keyence'
+        # ),
         
+        # Node(
+        #     package='vdm_cokhi_machine',
+        #     namespace='',
+        #     executable='pc_service_ros',
+        #     name='pc_service_ros'
+        # ),
+
         Node(
             package='vdm_cokhi_machine',
             namespace='',
-            executable='pc_service_ros',
-            name='pc_service_ros'
+            executable='plc_service_ros',
+            name='plc_service_ros',
+            output="screen",
         ),
     ])
