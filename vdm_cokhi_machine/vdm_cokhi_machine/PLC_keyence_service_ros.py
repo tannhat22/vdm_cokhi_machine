@@ -87,6 +87,7 @@ class PlcService(Node):
             'nameInvalid': 'Machine name Invalid!',
             'nameInuse': 'Machine name already in use!',
             'passErr': 'Password is Incorrect!',
+            'resetErr': 'Reset machine error!',
             'dbErr': 'Connection with database error!',
             'socketErr': 'Connection between Raspberry and PLC error!',
             'fatalErr': 'Something is wrong, please check all system!'
@@ -346,14 +347,28 @@ class PlcService(Node):
                                 self.reset_bit[2],
                                 self.reset_bit[3],
                                 [1])):
-                response.success = True
-                return response
-            
-            response.success = False
-            response.status = self.status['socketErr']
+                a = 0
+                resetOK = False
+                while not resetOK: 
+                    resetOK = not self.read_device(self.reset_bit[0],
+                                               self.reset_bit[1],
+                                               self.reset_bit[2],
+                                               self.reset_bit[3])[0]
+                    if a >= 1200:
+                        response.status = self.status['resetErr']
+                        break
+                    a += 1
 
-        response.success = False
-        response.status = self.status['passErr']
+                response.success = resetOK
+            
+            else:
+                response.success = False
+                response.status = self.status['socketErr']
+
+        else:
+            response.success = False
+            response.status = self.status['passErr']
+
         return response
 
     def create_machine_cb(self, request: CreateMachine.Request, response: CreateMachine.Response):
