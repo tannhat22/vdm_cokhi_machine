@@ -69,13 +69,14 @@ class PlcService(Node):
         # self.reset_machine_res = ['DM',0,'.U',1]
 
         ## Realtime data:
-        self.dataMachine_length = 3
+        self.dataMachine_length = 4
         self.separateMachine = 7
         self.dataMachines_res = ['DM',1017,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
         self.dataMachine_res_structure = {
             'signalLight': [1,0],
             'noload': [1,1],
             'underload': [1,2],
+            'off': [1,3],
             # 'valueSetting': [3,3],
             # 'timeReachSpeed': [1,6],
         }
@@ -313,7 +314,7 @@ class PlcService(Node):
         # Lấy tổng số ngày đã lưu và lọc ngày dựa trên yêu cầu
         i = 0
         if (dataHistory['totalDays'] > request.days):
-            i = request.days
+            i = dataHistory['totalDays'] - request.days
         
         response.success = True
         response.status = self.status['success']
@@ -443,7 +444,7 @@ class PlcService(Node):
 
     def update_machineInfo(self):
         self.machine_info = self.get_all_machine_name_db()
-        self.dataMachines_res = ['DM',1000,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
+        self.dataMachines_res = ['DM',1017,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
         return
     
     def handleSaveData(self,data):
