@@ -76,9 +76,9 @@ class PlcService(Node):
             'signalLight': [1,0],
             'noload': [1,1],
             'underload': [1,2],
-            'off': [1,3],
-            # 'valueSetting': [3,3],
-            # 'timeReachSpeed': [1,6],
+            'offtime': [1,3],
+            # 'valueSetting': [3,4],
+            # 'timeReachSpeed': [1,7],
         }
 
         # Status for response services:
@@ -133,7 +133,8 @@ class PlcService(Node):
             ''' (ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                  DATE TIMESTAMP NOT NULL,
                  NOLOAD INTEGER NOT NULL,
-                 UNDERLOAD INTEGER NOT NULL);''')
+                 UNDERLOAD INTEGER NOT NULL,
+                 OFFTIME INTEGER NOT NULL);''')
         except Exception as e:
             print(Exception)
         return
@@ -180,14 +181,17 @@ class PlcService(Node):
                 'totalDays': 0,
                 'dates': [],
                 'noload': [],
-                'underload': []
+                'underload': [],
+                'offtime': []
             }
             for row in rows:
                 result['totalDays'] +=1
                 result['dates'].append(row[1])
                 # result['dates'].append(row[1].date().strftime("%m/%d/%Y"))
                 result['noload'].append(row[2]) 
-                result['underload'].append(row[3]) 
+                result['underload'].append(row[3])
+                result['offtime'].append(row[4])
+
 
             return result
         except Exception as e:
@@ -206,7 +210,7 @@ class PlcService(Node):
             return False
     
     # Thêm dữ liệu ngày mới vào bảng database:
-    def add_history_data_db(self, tableName, date, noLoad, underLoad):
+    def add_history_data_db(self, tableName, date, noLoad, underLoad, offtime):
         try:
             self.cur.execute("SELECT * from " + tableName)
             totalDates = len(self.cur.fetchall())
@@ -215,11 +219,11 @@ class PlcService(Node):
                 self.cur.execute("CREATE TABLE momenttable AS SELECT * FROM " + tableName)
                 self.cur.execute("DELETE FROM " + tableName)
                 self.cur.execute("DELETE FROM sqlite_sequence WHERE name='" + tableName + "'")
-                self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD) SELECT DATE, NOLOAD, UNDERLOAD FROM momenttable")
+                self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD, OFFTIME) SELECT DATE, NOLOAD, UNDERLOAD, OFFTIME FROM momenttable")
                 self.delete_table("momenttable")
                 self.conn.commit()
             
-            self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD) VALUES (?, ?, ?)", (date, noLoad, underLoad))
+            self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD, OFFTIME) VALUES (?, ?, ?, ?)", (date, noLoad, underLoad, offtime))
             self.conn.commit()
             return True
         except Exception as e:
@@ -321,8 +325,7 @@ class PlcService(Node):
         response.dates = dataHistory['dates'][i:]
         response.noload = dataHistory['noload'][i:]
         response.underload = dataHistory['underload'][i:]
-
-        
+        response.offtime = dataHistory['offtime'][i:]
 
         return response
 
@@ -460,7 +463,8 @@ class PlcService(Node):
             name = self.machine_info['machineName'][i]
             noload = data[j + self.dataMachine_res_structure['noload'][1]]
             underload = data[j + self.dataMachine_res_structure['underload'][1]]
-            if not self.add_history_data_db(name,date,noload,underload):
+            offtime = data[j + self.dataMachine_res_structure['offtime'][1]]
+            if not self.add_history_data_db(name,date,noload,underload,offtime):
                 self.get_logger().info("ERROR: Save data of day error!!!")
                 return False
         
@@ -562,8 +566,9 @@ class PlcService(Node):
             machineState = StateMachine()
             machineState.name = self.machine_info['machineName'][i]
             machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
-            machineState.noload = (dataMachines[j + self.dataMachine_res_structure['noload'][1]])
-            machineState.underload = (dataMachines[j + self.dataMachine_res_structure['underload'][1]])
+            machineState.noload = dataMachines[j + self.dataMachine_res_structure['noload'][1]]
+            machineState.underload = dataMachines[j + self.dataMachine_res_structure['underload'][1]]
+            machineState.offtime = dataMachines[j + self.dataMachine_res_structure['offtime'][1]]
             # machineState.value_setting.min = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1]]
             # machineState.value_setting.max = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 1]
             # machineState.value_setting.current = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 2]

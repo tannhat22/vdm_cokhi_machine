@@ -6,3 +6,4 @@ string status
 string[] dates
 int32[] noload
 int32[] underload
+int32[] offtime
