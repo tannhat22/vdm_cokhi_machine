@@ -25,7 +25,8 @@ class PlcService(Node):
         time.sleep(1.0)
 
         # Database path:
-        self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        # self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
@@ -70,8 +71,8 @@ class PlcService(Node):
 
         ## Realtime data:
         self.dataMachine_length = 4
-        self.separateMachine = 7
-        self.dataMachines_res = ['DM',1017,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
+        self.separateMachine = 6
+        self.dataMachines_res = ['DM',1014,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
         self.dataMachine_res_structure = {
             'signalLight': [1,0],
             'noload': [1,1],
@@ -381,11 +382,11 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['nameInvalid']
 
-            elif self.checkNameIsExists(request.name):
+            elif self.checkNameIsExists(request.name.upper()):
                 response.success = False
                 response.status = self.status['nameInuse']
 
-            elif not self.add_machine_db(request.name):
+            elif not self.add_machine_db(request.name.upper()):
                 response.success = False
                 response.status = self.status['dbErr']
             
@@ -406,11 +407,11 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['nameInvalid']
 
-            elif self.checkNameIsExists(request.new_name):
+            elif self.checkNameIsExists(request.new_name.upper()):
                 response.success = False
                 response.status = self.status['nameInuse']
 
-            elif not self.update_machine_db(request.id_machine, request.new_name):
+            elif not self.update_machine_db(request.id_machine, request.new_name.upper()):
                 response.success = False
                 response.status = self.status['dbErr']
             
@@ -447,7 +448,7 @@ class PlcService(Node):
 
     def update_machineInfo(self):
         self.machine_info = self.get_all_machine_name_db()
-        self.dataMachines_res = ['DM',1017,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
+        self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
         return
     
     def handleSaveData(self,data):

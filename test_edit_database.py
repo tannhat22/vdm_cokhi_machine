@@ -17,4 +17,4 @@ for row in rows:
     # print(query)
     # cur.execute(query, (date, 1, 1, 1))
 # conn.commit()
-# conn.close()
+conn.close()
