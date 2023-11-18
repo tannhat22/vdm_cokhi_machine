@@ -1,6 +1,7 @@
 string password
 int32 id_machine
 string new_name
+string new_type
 ---
 bool success
 string status

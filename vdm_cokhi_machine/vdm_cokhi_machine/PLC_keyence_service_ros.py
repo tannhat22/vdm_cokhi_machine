@@ -4,8 +4,9 @@ import rclpy
 from rclpy.node import Node
 import sqlite3
 import datetime
+from collections import Counter
 
-from vdm_cokhi_machine_msgs.msg import StateMachine, StateMachinesStamped
+from vdm_cokhi_machine_msgs.msg import OverralMachine, StateMachine, StateMachinesStamped
 from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, ResetMachine
 from vdm_cokhi_machine_msgs.srv import CreateMachine, UpdateMachine, DeleteMachine
 
@@ -31,7 +32,8 @@ class PlcService(Node):
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
         self.create_table_group_machines_db(self.tableName)
-        self.machine_info = self.get_all_machine_name_db()
+        self.machine_info = self.get_machines_inform_db()
+        self.types_info = self.array_type_to_dict(self.machine_info['machineType'])
 
         # Ros Services:
         self.getAllMachineName_srv = self.create_service(GetAllMachineName, 'get_all_machine_name', self.get_all_machine_name_cb)
@@ -116,7 +118,8 @@ class PlcService(Node):
         try:
             self.cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
             ''' (ID INTEGER PRIMARY KEY     NOT NULL,
-                 NAME           TEXT    NOT NULL);''')
+                 NAME           TEXT    NOT NULL,
+                 TYPE           TEXT    NOT NULL);''')
             
             self.cur.execute("SELECT * from " + self.tableName)
             rows = self.cur.fetchall()
@@ -141,22 +144,25 @@ class PlcService(Node):
         return
 
     # Lấy dữ liệu tên của tất cả các máy từ database
-    def get_all_machine_name_db(self):
+    def get_machines_inform_db(self):
         try:
             self.cur.execute("SELECT * from " + self.tableName)
             rows = self.cur.fetchall()
             # num = 0
             result = {
                 'quantity': 0,
+                'idMachines': [],
                 'machineName': [],
-                'idMachines': []
+                'machineType': []
             }
             for row in rows:
                 result['quantity'] += 1
                 result['idMachines'].append(row[0])
-                result['machineName'].append(row[1]) 
+                result['machineName'].append(row[1])
+                result['machineType'].append(row[2])
                 # num += 1
             # result['quantity'] = num
+            self.types_info = self.array_type_to_dict(result['machineType'])
             return result
         except Exception as e:
             print(e)
@@ -200,9 +206,9 @@ class PlcService(Node):
             return False
 
     # Tạo thêm máy mới vào database
-    def add_machine_db(self, name):
+    def add_machine_db(self, name, type):
         try:
-            self.cur.execute("INSERT INTO " + self.tableName + " (NAME) VALUES (?)", (name,))
+            self.cur.execute("INSERT INTO " + self.tableName + " (NAME, TYPE) VALUES (?, ?)", (name, type))
             self.create_table_machine_history_db(name)
             self.conn.commit()
             return True
@@ -242,11 +248,11 @@ class PlcService(Node):
             return False
 
     # Sửa machine trong database:
-    def update_machine_db(self, id, newName):
+    def update_machine_db(self, id, newName, newType):
         try:
             machineName = self.get_machine_name_db(id)
             if self.update_table_name(machineName, newName):
-                self.cur.execute("UPDATE " + self.tableName + " SET NAME = ? WHERE ID = ?", (newName, id))
+                self.cur.execute("UPDATE " + self.tableName + " SET NAME = ?, TYPE = ? WHERE ID = ?", (newName, newType, id))
                 self.conn.commit()
                 return True
             return False
@@ -288,9 +294,15 @@ class PlcService(Node):
             print(e)
             return False
 
+    # Chuyển mảng 'loại máy' của các máy về thành dict và với giá trị là số lượng máy mỗi loại
+    def array_type_to_dict(self, type_arr):
+        count_dict = Counter(type_arr)
+        result_dict = dict(count_dict)
+        return result_dict
+
     def get_all_machine_name_cb(self, request: GetAllMachineName.Request, response: GetAllMachineName.Response):
         if request.get_allname:
-            self.machine_info = self.get_all_machine_name_db()
+            self.machine_info = self.get_machines_inform_db()
             if not self.machine_info:
                 response.success = False
                 response.status = self.status['dbErr']
@@ -301,6 +313,7 @@ class PlcService(Node):
             response.machines_quantity = self.machine_info['quantity']
             response.id_machines = self.machine_info['idMachines']
             response.machines_name = self.machine_info['machineName']
+            response.machines_type = self.machine_info['machineType']
             return response
 
     # Lấy dữ liệu của một máy dựa trên yêu cầu ID và số ngày cần lấy
@@ -386,7 +399,7 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['nameInuse']
 
-            elif not self.add_machine_db(request.name.upper()):
+            elif not self.add_machine_db(request.name.upper(), request.type):
                 response.success = False
                 response.status = self.status['dbErr']
             
@@ -402,7 +415,7 @@ class PlcService(Node):
         return response
 
     def update_machine_cb(self, request: UpdateMachine.Request, response: UpdateMachine.Response):
-        if self.check_password(request.password):            
+        if self.check_password(request.password):
             if request.new_name == '':
                 response.success = False
                 response.status = self.status['nameInvalid']
@@ -411,7 +424,7 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['nameInuse']
 
-            elif not self.update_machine_db(request.id_machine, request.new_name.upper()):
+            elif not self.update_machine_db(request.id_machine, request.new_name.upper(), request.new_type):
                 response.success = False
                 response.status = self.status['dbErr']
             
@@ -447,7 +460,7 @@ class PlcService(Node):
         return False
 
     def update_machineInfo(self):
-        self.machine_info = self.get_all_machine_name_db()
+        self.machine_info = self.get_machines_inform_db()
         self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
         return
     
@@ -562,10 +575,12 @@ class PlcService(Node):
                               self.save_data_bit[3],[0])
         
         state_machines = []
+        overral_machines_dict = {}
         for i in range(0,self.machine_info['quantity']):
             j = i * (self.dataMachine_length + self.separateMachine)
             machineState = StateMachine()
             machineState.name = self.machine_info['machineName'][i]
+            machineState.type = self.machine_info['machineType'][i]
             machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
             machineState.noload = dataMachines[j + self.dataMachine_res_structure['noload'][1]]
             machineState.underload = dataMachines[j + self.dataMachine_res_structure['underload'][1]]
@@ -575,12 +590,33 @@ class PlcService(Node):
             # machineState.value_setting.current = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 2]
             # machineState.time_reachspeed = dataMachines[j + self.dataMachine_res_structure['timeReachSpeed'][1]]
             state_machines.append(machineState)
-        
+
+            if machineState.type in overral_machines_dict:
+                overral_machines_dict[machineState.type][0] += 1
+                overral_machines_dict[machineState.type][1] += machineState.noload
+                overral_machines_dict[machineState.type][2] += machineState.underload
+                overral_machines_dict[machineState.type][3] += machineState.offtime
+            else:
+                overral_machines_dict[machineState.type] = [1, machineState.noload, machineState.underload, machineState.offtime]
+
+        # Tính số giờ theo từng loại máy
+        overral_machines = []
+        for type in overral_machines_dict:
+            machineOverral = OverralMachine()
+            machineOverral.type = type
+            machineOverral.quantity = overral_machines_dict[type][0]
+            machineOverral.noload = overral_machines_dict[type][1]
+            machineOverral.underload = overral_machines_dict[type][2]
+            machineOverral.offtime = overral_machines_dict[type][3]
+            overral_machines.append(machineOverral)
+
         msg = StateMachinesStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.machines_quantity = self.machine_info['quantity']
+        msg.types_quantity = len(overral_machines_dict)
         msg.id_machines = self.machine_info['idMachines']
         msg.state_machines = state_machines
+        msg.overral_machines = overral_machines
         self.pub_state_machine.publish(msg)
 
 
