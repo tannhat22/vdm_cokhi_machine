@@ -26,8 +26,8 @@ class PlcService(Node):
         time.sleep(1.0)
 
         # Database path:
-        # self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
-        self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'      
+        # self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
@@ -67,9 +67,9 @@ class PlcService(Node):
         self.reset_bit = ['MR',200,'.U',1]
         self.reset_machine_bit = ['MR',1000,'.U',1]
         self.max_bit_reset = 15
-        self.reset_change_bit = ['MR',1100, '.U',1]
+        # self.reset_change_bit = ['MR',1100, '.U',1]
+        self.reset_machine_res = ['DM',0,'.U',1]
         self.reset_separate = 0
-        # self.reset_machine_res = ['DM',0,'.U',1]
 
         ## Realtime data:
         self.dataMachine_length = 4
@@ -86,14 +86,15 @@ class PlcService(Node):
 
         # Status for response services:
         self.status = {
-            'success': 'All success',
-            'notFound': 'Data is not found!',
-            'nameInvalid': 'Machine name Invalid!',
-            'nameInuse': 'Machine name already in use!',
-            'passErr': 'Password is Incorrect!',
-            'resetErr': 'Reset machine error!',
-            'dbErr': 'Connection with database error!',
-            'socketErr': 'Connection between Raspberry and PLC error!',
+            'success': 'Thành công',
+            'notFound': 'Dữ liệu không tìm thấy!',
+            'nameInvalid': 'Tên máy không hợp lệ!',
+            'nameInuse': 'Tên máy đã được sử dụng!',
+            'typeInvalid': 'Loại máy không hợp lệ!',
+            'passErr': 'Sai mật khẩu!',
+            'resetErr': 'Reset máy lỗi!',
+            'dbErr': 'Lỗi cơ sở dữ liệu!',
+            'socketErr': 'Lỗi kết nối Raspberry và PLC!',
             'fatalErr': 'Something is wrong, please check all system!'
         }
 
@@ -350,11 +351,11 @@ class PlcService(Node):
         if self.check_password(request.password):
             indexMachine = self.machine_info['idMachines'].index(request.id_machine)
 
-            if (self.write_device(self.reset_machine_bit[0],
-                                self.reset_machine_bit[1] + indexMachine + self.reset_separate,
-                                self.reset_machine_bit[2],
-                                self.reset_machine_bit[3],
-                                [1]) and
+            if (self.write_device(self.reset_machine_res[0],
+                                self.reset_machine_res[1],
+                                self.reset_machine_res[2],
+                                self.reset_machine_res[3],
+                                [request.id_machine]) and
                 self.write_device(self.password_write_res[0],
                                 self.password_write_res[1],
                                 self.password_write_res[2],
@@ -395,6 +396,10 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['nameInvalid']
 
+            elif request.type == '':
+                response.success = False
+                response.status = self.status['typeInvalid']
+
             elif self.checkNameIsExists(request.name.upper()):
                 response.success = False
                 response.status = self.status['nameInuse']
@@ -419,6 +424,10 @@ class PlcService(Node):
             if request.new_name == '':
                 response.success = False
                 response.status = self.status['nameInvalid']
+
+            elif request.new_type == '':
+                response.success = False
+                response.status = self.status['typeInvalid']
 
             elif self.checkNameIsExists(request.new_name.upper()):
                 response.success = False
@@ -503,9 +512,10 @@ class PlcService(Node):
                 device = 'RD' + ' ' + deviceType + str(deviceNo) + format + '\x0D' 
             dataformat = device.encode()
             self.soc.sendall(dataformat)
-            dataRecv = self.soc.recv(1024)
+            dataRecv = self.soc.recv(4096)
             dataRecvDec = dataRecv.decode()
             dataResp = dataRecvDec.split(' ')
+            self.get_logger().warn(f'len data: {len(dataResp)}')
             dataResp[len(dataResp)-1] = dataResp[len(dataResp)-1][:-2]
             for i in range (0,len(dataResp)):
                 dataResp[i] = int(dataResp[i])
