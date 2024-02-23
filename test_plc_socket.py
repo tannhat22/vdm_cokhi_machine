@@ -1,26 +1,14 @@
-from collections import Counter
+import datetime
+import subprocess
 
-def array_to_dict(input_array):
-    # Sử dụng Counter để đếm số lần xuất hiện của từng phần tử
-    count_dict = Counter(input_array)
-    
-    # Chuyển Counter thành một từ điển
-    result_dict = dict(count_dict)
-    
-    return result_dict
+def set_system_time(year, month, day, hour, minute, second):
+    # Xác định định dạng thời gian
+    new_time = datetime.datetime(year, month, day, hour, minute, second)
+    # Chuyển định dạng thời gian thành chuỗi
+    time_str = new_time.strftime('%Y-%m-%d %H:%M:%S')
+    # Sử dụng lệnh date để cài đặt thời gian hệ thống
+    subprocess.run(['sudo', 'date', '-s', time_str])
+    print('Đã cài đặt thời gian hệ thống thành công.')
 
-# Ví dụ sử dụng
-input_array = ['GS', 'BD', 'GR', 'GS', 'GS', 'GR', 'LN']
-result_dictionary = array_to_dict(input_array)
-a = {'GS': [5,]}
-print(result_dictionary)
-print(len(result_dictionary))
-
-result = {}
-for i in input_array:
-    if i in result:
-        result[i][0] += 1
-    else:
-        result[i] = [1]
-
-
+# Gọi hàm set_system_time để cài đặt thời gian
+set_system_time(2024, 2, 23, 10, 30, 0)
