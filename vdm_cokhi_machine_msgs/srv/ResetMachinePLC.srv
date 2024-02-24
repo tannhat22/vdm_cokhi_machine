@@ -1,0 +1,6 @@
+string name # Tên máy
+int32 plc_address # Địa chỉ PLC
+string password # Mật khẩu
+---
+bool success
+string status

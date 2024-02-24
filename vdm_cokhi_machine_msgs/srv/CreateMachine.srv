@@ -1,6 +1,8 @@
 string password
 string name
 string type
+string plc_model
+int16 plc_address
 ---
 bool success
 string status

@@ -6,3 +6,5 @@ int32 machines_quantity
 int32[] id_machines
 string[] machines_name
 string[] machines_type
+string[] plc_model
+int16[] plc_address

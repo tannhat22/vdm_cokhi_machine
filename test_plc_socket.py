@@ -1,14 +1,34 @@
-import datetime
-import subprocess
+def sort_rows_by_plc_address(rows, plc_model):
+    try:
+        # Sắp xếp các hàng dựa trên giá trị tăng dần của row[4]
+        sorted_rows = sorted(rows, key=lambda x: x[3])
 
-def set_system_time(year, month, day, hour, minute, second):
-    # Xác định định dạng thời gian
-    new_time = datetime.datetime(year, month, day, hour, minute, second)
-    # Chuyển định dạng thời gian thành chuỗi
-    time_str = new_time.strftime('%Y-%m-%d %H:%M:%S')
-    # Sử dụng lệnh date để cài đặt thời gian hệ thống
-    subprocess.run(['sudo', 'date', '-s', time_str])
-    print('Đã cài đặt thời gian hệ thống thành công.')
+        result = {
+            'quantity': len(sorted_rows),
+            'idMachines': [],
+            'machineName': [],
+            'machineType': [],
+            'PLC_address': [],
+        }
+        for row in sorted_rows:
+                result['idMachines'].append(row[0])
+                result['machineName'].append(row[1])
+                result['machineType'].append(row[2])
+                result['PLC_address'].append(row[3])
+        return result
+    except Exception as e:
+        print("Error:", e)
+        return False
 
-# Gọi hàm set_system_time để cài đặt thời gian
-set_system_time(2024, 2, 23, 10, 30, 0)
+# Danh sách các hàng mẫu (giả lập)
+rows = [
+    (1, 'Machine1', 'TypeA', 123),
+    (2, 'Machine2', 'TypeB', 456),
+    (3, 'Machine3', 'TypeA', 789),
+    (4, 'Machine4', 'TypeC', 1)
+]
+
+# Thử sử dụng hàm
+plc_model = '789'  # Giả sử giá trị PLC_model cần tìm là '789'
+result = sort_rows_by_plc_address(rows, plc_model)
+print(result)

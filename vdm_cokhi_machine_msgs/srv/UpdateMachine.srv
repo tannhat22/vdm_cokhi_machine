@@ -2,6 +2,8 @@ string password
 int32 id_machine
 string new_name
 string new_type
+string new_plc_model
+int16 new_plc_address
 ---
 bool success
 string status

@@ -120,7 +120,9 @@ class PlcService(Node):
             self.cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
             ''' (ID INTEGER PRIMARY KEY     NOT NULL,
                  NAME           TEXT    NOT NULL,
-                 TYPE           TEXT    NOT NULL);''')
+                 TYPE           TEXT    NOT NULL,
+                 PLC            TEXT    NOT NULL,
+                 ADDRESS     INTEGER    NOT NULL);''')
             
             self.cur.execute("SELECT * from " + self.tableName)
             rows = self.cur.fetchall()

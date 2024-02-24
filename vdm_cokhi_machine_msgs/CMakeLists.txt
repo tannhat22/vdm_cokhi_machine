@@ -12,7 +12,9 @@ find_package(rosidl_default_generators REQUIRED)
 
 set(msg_files
   "msg/OverralMachine.msg"
+  "msg/ResetMachinePLC.msg"
   "msg/StateMachine.msg"
+  "msg/StateMachineArray.msg"
   "msg/StateMachinesStamped.msg"
   "msg/ValueSetting.msg"
 )
@@ -21,6 +23,7 @@ set(srv_files
   "srv/GetAllMachineName.srv"
   "srv/GetMachineData.srv"
   "srv/ResetMachine.srv"
+  "srv/ResetMachinePLC.srv"
   "srv/CreateMachine.srv"
   "srv/UpdateMachine.srv"
   "srv/DeleteMachine.srv"
