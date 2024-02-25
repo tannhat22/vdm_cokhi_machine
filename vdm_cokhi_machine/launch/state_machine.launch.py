@@ -25,8 +25,24 @@ def generate_launch_description():
         Node(
             package='vdm_cokhi_machine',
             namespace='',
-            executable='plc_service_ros',
-            name='plc_service_ros',
+            executable='pc_service_ros',
+            name='PC_service_ros',
+            output="screen",
+        ),
+
+        Node(
+            package='vdm_cokhi_machine',
+            namespace='',
+            executable='plc_FX_service_ros',
+            name='PLC_mitsu_ros',
+            output="screen",
+        ),
+
+        Node(
+            package='vdm_cokhi_machine',
+            namespace='',
+            executable='plc_KV_service_ros',
+            name='PLC_keyence_ros',
             output="screen",
         ),
     ])

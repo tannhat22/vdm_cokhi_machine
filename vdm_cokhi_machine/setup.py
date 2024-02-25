@@ -24,7 +24,8 @@ setup(
     entry_points={
         'console_scripts': [
             'pc_service_ros = vdm_cokhi_machine.PC_service_ros:main',
-            'plc_service_ros = vdm_cokhi_machine.PLC_keyence_service_ros:main'
+            'plc_FX_service_ros = vdm_cokhi_machine.PLC_fx3u_ros:main',
+            'plc_KV_service_ros = vdm_cokhi_machine.PLC_keyence_ros:main',
         ],
     },
 )

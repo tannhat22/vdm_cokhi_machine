@@ -13,9 +13,9 @@ find_package(rosidl_default_generators REQUIRED)
 set(msg_files
   "msg/OverralMachine.msg"
   "msg/ResetMachinePLC.msg"
-  "msg/StateMachine.msg"
-  "msg/StateMachineArray.msg"
-  "msg/StateMachinesStamped.msg"
+  "msg/MachineState.msg"
+  "msg/MachineStateArray.msg"
+  "msg/MachinesStateStamped.msg"
   "msg/ValueSetting.msg"
 )
 

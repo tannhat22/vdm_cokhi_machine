@@ -1,15 +1,17 @@
-import time
-import socket
 import rclpy
 from rclpy.node import Node
 import sqlite3
-import datetime
 from collections import Counter
 
-from vdm_cokhi_machine_msgs.msg import OverralMachine, StateMachine, StateMachinesStamped
+from vdm_cokhi_machine_msgs.msg import OverralMachine, MachineState, MachineStateArray, MachinesStateStamped
 from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, ResetMachine, ResetMachinePLC
 from vdm_cokhi_machine_msgs.srv import CreateMachine, UpdateMachine, DeleteMachine
 
+
+class State:
+    def __init__(self, ID: int = 0, state: MachineState = None):
+        self.ID = ID
+        self.state = state
 
 class PlcService(Node):
     def __init__(self):
@@ -18,6 +20,7 @@ class PlcService(Node):
         self.maximumDates = 365
         self.plc_keyence = 'KV-5500'
         self.plc_mitsu = 'FX3U'
+        self.machines = {}
 
         # Database path:
         self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'  
@@ -26,8 +29,10 @@ class PlcService(Node):
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
         self.create_table_group_machines_db(self.tableName)
-        self.machine_info = self.get_machines_inform_db()
-        self.types_info = self.array_type_to_dict(self.machine_info['machineType'])
+        self.machines_info = self.get_machines_inform_db()
+        if self.machines_info:
+            for i in range(self.machines_info['quantity']):
+                self.machines[self.machines_info['machineName'][i]] = State(ID=self.machines_info['idMachines'][i])
 
         # Ros Services
         # Server:
@@ -48,8 +53,11 @@ class PlcService(Node):
 
 
         # Ros pub, sub:
-        self.pub_state_machine = self.create_publisher(StateMachinesStamped, '/state_machines', 10)
+        # Publishers:
+        self.pub_state_machines = self.create_publisher(MachinesStateStamped, '/state_machines', 10)
 
+        # Subcribers:
+        self.sub_state_machine = self.create_subscription(MachineStateArray, '/state_machine_plc', self.state_machine_cb, 10)
 
         #------ Address all device -------:
         ## System data:
@@ -69,7 +77,9 @@ class PlcService(Node):
             'notFound': 'Dữ liệu không tìm thấy!',
             'nameInvalid': 'Tên máy không hợp lệ!',
             'nameInuse': 'Tên máy đã được sử dụng!',
+            'addressInuse': 'Địa chỉ PLC này đã được sử dụng!',
             'typeInvalid': 'Loại máy không hợp lệ!',
+            'PLCInvalid': 'Model PLC không hợp lệ!',
             'passErr': 'Sai mật khẩu!',
             'resetErr': 'Reset máy lỗi!',
             'dbErr': 'Lỗi cơ sở dữ liệu!',
@@ -77,8 +87,8 @@ class PlcService(Node):
             'fatalErr': 'Something is wrong, please check all system!'
         }
 
-        timer_period = 0.2
-        self.timer = self.create_timer(timer_period, self.timer_callback)
+        # timer_period = 0.2
+        # self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
 
 
@@ -137,7 +147,7 @@ class PlcService(Node):
                 result['PLC_address'].append(row[4])
                 # num += 1
             # result['quantity'] = num
-            self.types_info = self.array_type_to_dict(result['machineType'])
+            # self.types_info = self.array_type_to_dict(result['machineType'])
             return result
         except Exception as e:
             print(e)
@@ -275,7 +285,7 @@ class PlcService(Node):
             return False  
 
     # Kiểm tra tên machine có tồn tại trong database:
-    def checkNameIsExists(self, name, plc, address):
+    def checkNameIsExists(self, name):
         try:
             self.cur.execute("SELECT ID FROM " + self.tableName + " WHERE name = ?",(name,))
             data = self.cur.fetchone()
@@ -288,9 +298,9 @@ class PlcService(Node):
             return False
         
     # Kiểm tra địa chỉ machine trong cùng một PLC có tồn tại trong database:
-    def checkAddressIsExists(self,name,address):
+    def checkAddressIsExists(self, plc, address):
         try:
-            self.cur.execute("SELECT ID FROM " + self.tableName + " WHERE name = ?",(name,))
+            self.cur.execute("SELECT ID FROM " + self.tableName + " WHERE PLC = ? AND ADDRESS = ?",(plc, address))
             data = self.cur.fetchone()
             if data is None:
                 return False
@@ -308,28 +318,29 @@ class PlcService(Node):
 
     def get_all_machine_name_cb(self, request: GetAllMachineName.Request, response: GetAllMachineName.Response):
         if request.get_allname:
-            self.machine_info = self.get_machines_inform_db()
-            if not self.machine_info:
+            # self.machine_info = self.get_machines_inform_db()
+            machine_info = self.get_machines_inform_db()
+            if not machine_info:
                 response.success = False
                 response.status = self.status['dbErr']
                 return response
 
             response.success = True
             response.status = self.status['success']
-            response.machines_quantity = self.machine_info['quantity']
-            response.id_machines = self.machine_info['idMachines']
-            response.machines_name = self.machine_info['machineName']
-            response.machines_type = self.machine_info['machineType']
-            response.plc_model = self.machine_info['PLC_model']
-            response.plc_address = self.machine_info['PLC_address']
+            response.machines_quantity = machine_info['quantity']
+            response.id_machines = machine_info['idMachines']
+            response.machines_name = machine_info['machineName']
+            response.machines_type = machine_info['machineType']
+            response.plc_model = machine_info['PLC_model']
+            response.plc_address = machine_info['PLC_address']
             return response
 
     # Lấy dữ liệu của một máy dựa trên yêu cầu ID và số ngày cần lấy
     def get_machine_data_cb(self, request: GetMachineData.Request, response: GetMachineData.Response):
-        if not self.machine_info:
-            response.success = False
-            response.status = self.status['dbErr']
-            return response
+        # if not self.machine_info:
+        #     response.success = False
+        #     response.status = self.status['dbErr']
+        #     return response
         
         # Lấy dữ liệu ngày từ database:
         machineName = self.get_machine_name_db(request.id_machine)
@@ -355,8 +366,8 @@ class PlcService(Node):
 
     def reset_machine_cb(self, request: ResetMachine.Request, response: ResetMachine.Response):
         machine = self.get_machine_inform_db(request.id_machine)
-        self.get_logger().info(f'Reset machine: {machine['name']}, '
-                               f'PLC model: {machine['plc']}, PLC address: {machine['address']}') 
+        self.get_logger().info(f'Reset machine: {machine["name"]}, '
+                               f'PLC model: {machine["plc"]}, PLC address: {machine["address"]}')
 
         if self.check_password(request.password):
             result = self.send_request(machine,request.password)
@@ -381,11 +392,20 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['typeInvalid']
 
+            elif request.plc_model == '':
+                response.success = False
+                response.status = self.status['PLCInvalid']
+
             elif self.checkNameIsExists(request.name.upper()):
                 response.success = False
                 response.status = self.status['nameInuse']
 
-            elif not self.add_machine_db(request.name.upper(), request.type):
+            elif self.checkAddressIsExists(request.plc_model, request.plc_address):
+                response.success = False
+                response.status = self.status['addressInuse']    
+
+            elif not self.add_machine_db(request.name.upper(), request.type,
+                                         request.plc_model, request.plc_address):
                 response.success = False
                 response.status = self.status['dbErr']
             
@@ -410,11 +430,20 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['typeInvalid']
 
+            elif request.new_plc_model == '':
+                response.success = False
+                response.status = self.status['PLCInvalid']
+
             elif self.checkNameIsExists(request.new_name.upper()):
                 response.success = False
                 response.status = self.status['nameInuse']
 
-            elif not self.update_machine_db(request.id_machine, request.new_name.upper(), request.new_type):
+            elif self.checkAddressIsExists(request.new_plc_model, request.new_plc_address):
+                response.success = False
+                response.status = self.status['addressInuse']    
+
+            elif not self.update_machine_db(request.id_machine, request.new_name.upper(),
+                                            request.new_type, request.new_plc_model, request.new_plc_address):
                 response.success = False
                 response.status = self.status['dbErr']
             
@@ -450,30 +479,12 @@ class PlcService(Node):
         return False
 
     def update_machineInfo(self):
-        self.machine_info = self.get_machines_inform_db()
-        self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['quantity']]
+        self.machines_info = self.get_machines_inform_db()
+        if self.machines_info:
+            for i in range(self.machines_info['quantity']):
+                if self.machines_info['machineName'][i] not in self.machines:
+                    self.machines[self.machines_info['machineName'][i]] = State(ID=self.machines_info['idMachines'][i])
         return
-    
-    def handleSaveData(self,data):
-        dataClock = self.read_device(self.clock_res[0],
-                                     self.clock_res[1],
-                                     self.clock_res[2],
-                                     self.clock_res[3])
-
-        date = datetime.datetime(2000 + dataClock[0],dataClock[1],dataClock[2],dataClock[3],dataClock[4],dataClock[5])
-
-        for i in range(0,self.machine_info['quantity']):
-            j = i * (self.dataMachine_length + self.separateMachine)
-            name = self.machine_info['machineName'][i]
-            noload = data[j + self.dataMachine_res_structure['noload'][1]]
-            underload = data[j + self.dataMachine_res_structure['underload'][1]]
-            offtime = data[j + self.dataMachine_res_structure['offtime'][1]]
-            if not self.add_history_data_db(name,date,noload,underload,offtime):
-                self.get_logger().info("ERROR: Save data of day error!!!")
-                return False
-        
-        self.get_logger().info("Save data of day success!")
-        return True
     
     def send_request(self, machine, password):
         reqPLC = ResetMachinePLC.Request()
@@ -486,114 +497,26 @@ class PlcService(Node):
             self.future = self.mitsu_client.call_async(reqPLC)
         rclpy.spin_until_future_complete(self, self.future)
         return self.future.result()
-
-
-    #"------------Read device-------------"
-    # deviceType: 'DM'
-    # deviceNo: 100
-    # format: .U: Unsigned 16-bit DEC
-    #         .S: Signed 16-bit DEC
-    #         .D: Unsigned 32-bit DEC
-    #         .L: Signed 32-bit DEC
-    #         .H: 16-bit HEX
-    # length: 3
-    def read_device(self,deviceType: str = 'DM', deviceNo: int = 0, format: str = '', length: int = 1):
-        try:
-            if length > 1:
-                device = 'RDS' + ' ' + deviceType + str(deviceNo) + format + ' ' + str(length) + '\x0D'
-            else:
-                device = 'RD' + ' ' + deviceType + str(deviceNo) + format + '\x0D' 
-            dataformat = device.encode()
-            self.soc.sendall(dataformat)
-            dataRecv = self.soc.recv(4096)
-            dataRecvDec = dataRecv.decode()
-            dataResp = dataRecvDec.split(' ')
-            self.get_logger().warn(f'len data: {len(dataResp)}')
-            dataResp[len(dataResp)-1] = dataResp[len(dataResp)-1][:-2]
-            for i in range (0,len(dataResp)):
-                dataResp[i] = int(dataResp[i])
-            return dataResp
-        except Exception as e:
-            print(e)
-            return False
-        
-
-    #"------------Write device-------------"
-    # deviceType: 'DM'
-    # deviceNo: 100
-    # format: .U: Unsigned 16-bit DEC
-    #         .S: Signed 16-bit DEC
-    #         .D: Unsigned 32-bit DEC
-    #         .L: Signed 32-bit DEC
-    #         .H: 16-bit HEX
-    # length: 3
-    # data: [1,2,3]
-    def write_device(self, deviceType: str = 'R', deviceNo: int = 0, format: str = '', length: int = 1, data: list = []):
-        try:
-            if length != len(data):
-                print('write data error (length of data not correct!)')
-                return False
-            
-            if length > 1:
-                device = 'WRS' + ' ' + deviceType + str(deviceNo) + format + ' ' + str(length)
-                for i in data:
-                    device += (' ' + str(i))
-                device += '\x0D'
-            else:
-                device = 'WR' + ' ' + deviceType + str(deviceNo) + format + ' ' + str(data[0]) + '\x0D'
-            
-            dataformat = device.encode()
-            self.soc.sendall(dataformat)
-            dataRecv = self.soc.recv(1024)
-            dataRecvDec = dataRecv.decode()
-            dataResp = dataRecvDec.split(' ')
-            dataResp[len(dataResp)-1] = dataResp[len(dataResp)-1][:-2]
-            
-            if (dataResp[0]== 'OK'):
-                return True
-            return False
-        except Exception as e:
-            print(e)
-            return False
     
-    
+
+    def state_machine_cb(self, msg: MachineStateArray):
+        for state in msg.state_machines:
+            if state.name in self.machines:
+                self.machines[state.name].state = state
+            else:
+                self.get_logger().warn(f'Detect machine is not sync: {state.name}')
+
+        self.timer_callback()
+
     def timer_callback(self):
-        if not self.machine_info: return
-
-        saveDataBit = self.read_device(self.save_data_bit[0],
-                                      self.save_data_bit[1],
-                                      self.save_data_bit[2],
-                                      self.save_data_bit[3])[0]
-
-        dataMachines = self.read_device(self.dataMachines_res[0],
-                                        self.dataMachines_res[1],
-                                        self.dataMachines_res[2],
-                                        self.dataMachines_res[3])
-        
-        if saveDataBit:
-            self.handleSaveData(dataMachines)
-            self.write_device(self.save_data_bit[0],
-                              self.save_data_bit[1],
-                              self.save_data_bit[2],
-                              self.save_data_bit[3],[0])
-        
+        # if not self.machine_info: return
         state_machines = []
+        machineID = []
         overral_machines_dict = {}
-        for i in range(0,self.machine_info['quantity']):
-            j = i * (self.dataMachine_length + self.separateMachine)
-            machineState = StateMachine()
-            machineState.name = self.machine_info['machineName'][i]
-            machineState.type = self.machine_info['machineType'][i]
-            machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
-            machineState.noload = dataMachines[j + self.dataMachine_res_structure['noload'][1]]
-            machineState.underload = dataMachines[j + self.dataMachine_res_structure['underload'][1]]
-            machineState.offtime = dataMachines[j + self.dataMachine_res_structure['offtime'][1]]
-            # machineState.value_setting.min = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1]]
-            # machineState.value_setting.max = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 1]
-            # machineState.value_setting.current = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 2]
-            # machineState.time_reachspeed = dataMachines[j + self.dataMachine_res_structure['timeReachSpeed'][1]]
+        for machine in self.machines:
+            machineID.append(self.machines[machine].ID)
+            machineState = self.machines[machine].state
             state_machines.append(machineState)
-
             if machineState.type in overral_machines_dict:
                 overral_machines_dict[machineState.type][0] += 1
                 overral_machines_dict[machineState.type][1] += machineState.noload
@@ -613,14 +536,14 @@ class PlcService(Node):
             machineOverral.offtime = overral_machines_dict[type][3]
             overral_machines.append(machineOverral)
 
-        msg = StateMachinesStamped()
+        msg = MachinesStateStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.machines_quantity = self.machine_info['quantity']
+        msg.machines_quantity = len(self.machines)
         msg.types_quantity = len(overral_machines_dict)
-        msg.id_machines = self.machine_info['idMachines']
+        msg.id_machines = machineID
         msg.state_machines = state_machines
         msg.overral_machines = overral_machines
-        self.pub_state_machine.publish(msg)
+        self.pub_state_machines.publish(msg)
 
 
 def main(args=None):
