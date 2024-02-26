@@ -3,6 +3,7 @@ from rclpy.node import Node
 import sqlite3
 from collections import Counter
 
+from std_msgs.msg import Empty
 from vdm_cokhi_machine_msgs.msg import OverralMachine, MachineState, MachineStateArray, MachinesStateStamped
 from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, ResetMachine, ResetMachinePLC
 from vdm_cokhi_machine_msgs.srv import CreateMachine, UpdateMachine, DeleteMachine
@@ -12,6 +13,7 @@ class State:
     def __init__(self, ID: int = 0, state: MachineState = None):
         self.ID = ID
         self.state = state
+        self.isConnected = False
 
 class PlcService(Node):
     def __init__(self):
@@ -23,8 +25,8 @@ class PlcService(Node):
         self.machines = {}
 
         # Database path:
-        self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'  
-        # self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        # self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'  
+        self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
@@ -38,23 +40,16 @@ class PlcService(Node):
         # Server:
         self.getAllMachineName_srv = self.create_service(GetAllMachineName, 'get_all_machine_name', self.get_all_machine_name_cb)
         self.getMachineData_srv = self.create_service(GetMachineData, 'get_machine_data', self.get_machine_data_cb)
-        self.resetMachine_srv = self.create_service(ResetMachine, 'reset_machine', self.reset_machine_cb)
+        # self.resetMachine_srv = self.create_service(ResetMachine, 'reset_machine', self.reset_machine_cb)
         self.createMachine_srv = self.create_service(CreateMachine, 'create_machine', self.create_machine_cb)
         self.updateMachine_srv = self.create_service(UpdateMachine, 'update_machine', self.update_machine_cb)
         self.deleteMachine_srv = self.create_service(DeleteMachine, 'delete_machine', self.delete_machine_cb)
-
-        # Client:
-        self.keyence_client = self.create_client(ResetMachinePLC, 'reset_machine_plc_kv')
-        self.mitsu_client = self.create_client(ResetMachinePLC, 'reset_machine_plc_fx')
-        # while not self.keyence_client.wait_for_service(timeout_sec=10.0):
-        #     self.get_logger().info('Keyence service not available, waiting again...')
-        # while not self.mitsu_client.wait_for_service(timeout_sec=10.0):
-        #     self.get_logger().info('FX3U service not available, waiting again...')
 
 
         # Ros pub, sub:
         # Publishers:
         self.pub_state_machines = self.create_publisher(MachinesStateStamped, '/state_machines', 10)
+        self.pub_update_database = self.create_publisher(Empty,'/update_database',10)
 
         # Subcribers:
         self.sub_state_machine = self.create_subscription(MachineStateArray, '/state_machine_plc', self.state_machine_cb, 10)
@@ -87,8 +82,8 @@ class PlcService(Node):
             'fatalErr': 'Something is wrong, please check all system!'
         }
 
-        # timer_period = 0.2
-        # self.timer = self.create_timer(timer_period, self.timer_callback)
+        timer_period = 0.5
+        self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
 
 
@@ -170,11 +165,11 @@ class PlcService(Node):
             self.cur.execute("SELECT * FROM " + self.tableName + " WHERE ID = ?",(id,))
             row = self.cur.fetchone()
             return {
-                "ID:", row[0],
-                "name:", row[1],
-                "type:", row[2],
-                "plc:", row[3],
-                "address:", row[4],
+                "ID": row[0],
+                "name": row[1],
+                "type": row[2],
+                "plc": row[3],
+                "address": row[4],
             }
         except Exception as e:
             print(e)
@@ -242,8 +237,11 @@ class PlcService(Node):
     # Sửa tên bảng trong database:
     def update_table_name(self, tableOldName, tableNewName):
         try:
-            self.cur.execute("ALTER TABLE " + tableOldName + " RENAME TO " + tableNewName)
-            self.conn.commit()
+            if tableOldName == tableNewName:
+                pass
+            else:
+                self.cur.execute("ALTER TABLE " + tableOldName + " RENAME TO " + tableNewName)
+                self.conn.commit()
             return True
         except Exception as e:
             print(e)
@@ -267,6 +265,8 @@ class PlcService(Node):
     def delete_table(self, tableName):
         try:
             self.cur.execute("DROP TABLE IF EXISTS " + tableName)
+            self.conn.commit()
+            return True
         except Exception as e:
             print(e)
             return False
@@ -285,27 +285,35 @@ class PlcService(Node):
             return False  
 
     # Kiểm tra tên machine có tồn tại trong database:
-    def checkNameIsExists(self, name):
+    def checkNameIsExists(self, name, ID: int = None):
         try:
             self.cur.execute("SELECT ID FROM " + self.tableName + " WHERE name = ?",(name,))
             data = self.cur.fetchone()
             if data is None:
                 return False
             else:
-                return True
+                if (ID is not None and
+                    ID == data[0]):
+                    return False
+                else:    
+                    return True
         except Exception as e:
             print(e)
             return False
         
     # Kiểm tra địa chỉ machine trong cùng một PLC có tồn tại trong database:
-    def checkAddressIsExists(self, plc, address):
+    def checkAddressIsExists(self, plc, address, ID: int = None):
         try:
             self.cur.execute("SELECT ID FROM " + self.tableName + " WHERE PLC = ? AND ADDRESS = ?",(plc, address))
             data = self.cur.fetchone()
             if data is None:
                 return False
             else:
-                return True
+                if (ID is not None and
+                    ID == data[0]):
+                    return False
+                else:    
+                    return True
         except Exception as e:
             print(e)
             return False
@@ -364,25 +372,26 @@ class PlcService(Node):
 
 
 
-    def reset_machine_cb(self, request: ResetMachine.Request, response: ResetMachine.Response):
-        machine = self.get_machine_inform_db(request.id_machine)
-        self.get_logger().info(f'Reset machine: {machine["name"]}, '
-                               f'PLC model: {machine["plc"]}, PLC address: {machine["address"]}')
+    # def reset_machine_cb(self, request: ResetMachine.Request, response: ResetMachine.Response):
+    #     machine = self.get_machine_inform_db(request.id_machine)
+    #     self.get_logger().info(f'Reset machine: {machine["name"]}, '
+    #                            f'PLC model: {machine["plc"]}, PLC address: {machine["address"]}')
 
-        if self.check_password(request.password):
-            result = self.send_request(machine,request.password)
-            if result.success:
-                response.success = True
-            else:
-                response.success = False
-                response.status = result.status
-        else:
-            response.success = False
-            response.status = self.status['passErr']
+    #     if self.check_password(request.password):
+    #         result = self.send_request(machine,request.password)
+    #         if result.success:
+    #             response.success = True
+    #         else:
+    #             response.success = False
+    #             response.status = result.status
+    #     else:
+    #         response.success = False
+    #         response.status = self.status['passErr']
 
-        return response
+    #     return response
 
     def create_machine_cb(self, request: CreateMachine.Request, response: CreateMachine.Response):
+        self.get_logger().info('Receiv request create new machine')
         if self.check_password(request.password):
             if request.name == '':
                 response.success = False
@@ -421,6 +430,7 @@ class PlcService(Node):
         return response
 
     def update_machine_cb(self, request: UpdateMachine.Request, response: UpdateMachine.Response):
+        self.get_logger().info('Receiv request update machine')
         if self.check_password(request.password):
             if request.new_name == '':
                 response.success = False
@@ -434,13 +444,13 @@ class PlcService(Node):
                 response.success = False
                 response.status = self.status['PLCInvalid']
 
-            elif self.checkNameIsExists(request.new_name.upper()):
+            elif self.checkNameIsExists(request.new_name.upper(), request.id_machine):
                 response.success = False
                 response.status = self.status['nameInuse']
 
-            elif self.checkAddressIsExists(request.new_plc_model, request.new_plc_address):
+            elif self.checkAddressIsExists(request.new_plc_model, request.new_plc_address, request.id_machine):
                 response.success = False
-                response.status = self.status['addressInuse']    
+                response.status = self.status['addressInuse']
 
             elif not self.update_machine_db(request.id_machine, request.new_name.upper(),
                                             request.new_type, request.new_plc_model, request.new_plc_address):
@@ -459,6 +469,7 @@ class PlcService(Node):
         return response
 
     def delete_machine_cb(self, request: DeleteMachine.Request, response: DeleteMachine.Response):
+        self.get_logger().info('Receiv request delete machine')
         if self.check_password(request.password):
             if self.delete_machine_db(request.id_machine):
                 self.update_machineInfo()
@@ -484,29 +495,33 @@ class PlcService(Node):
             for i in range(self.machines_info['quantity']):
                 if self.machines_info['machineName'][i] not in self.machines:
                     self.machines[self.machines_info['machineName'][i]] = State(ID=self.machines_info['idMachines'][i])
+        msg = Empty()
+        self.pub_update_database.publish(msg)
         return
     
-    def send_request(self, machine, password):
-        reqPLC = ResetMachinePLC.Request()
-        reqPLC.name = machine['name']
-        reqPLC.plc_address = machine['address']
-        reqPLC.password = password
-        if machine['plc'] == self.plc_keyence:
-            self.future = self.keyence_client.call_async(reqPLC)
-        elif machine['plc'] == self.plc_mitsu:
-            self.future = self.mitsu_client.call_async(reqPLC)
-        rclpy.spin_until_future_complete(self, self.future)
-        return self.future.result()
+    # def send_request(self, machine, password):
+    #     reqPLC = ResetMachinePLC.Request()
+    #     reqPLC.name = machine['name']
+    #     reqPLC.plc_address = machine['address']
+    #     reqPLC.password = password
+    #     if machine['plc'] == self.plc_keyence:
+    #         self.future = self.keyence_client.call_async(reqPLC)
+    #     elif machine['plc'] == self.plc_mitsu:
+    #         self.future = self.mitsu_client.call_async(reqPLC)
+    #     self.future.add_done_callback()
+    #     self.get_logger().info("DA chay xong service")
+    #     return self.future.result()
     
 
     def state_machine_cb(self, msg: MachineStateArray):
         for state in msg.state_machines:
             if state.name in self.machines:
                 self.machines[state.name].state = state
+                self.machines[state.name].isConnected = True
             else:
                 self.get_logger().warn(f'Detect machine is not sync: {state.name}')
 
-        self.timer_callback()
+        # self.timer_callback()
 
     def timer_callback(self):
         # if not self.machine_info: return
@@ -514,16 +529,17 @@ class PlcService(Node):
         machineID = []
         overral_machines_dict = {}
         for machine in self.machines:
-            machineID.append(self.machines[machine].ID)
-            machineState = self.machines[machine].state
-            state_machines.append(machineState)
-            if machineState.type in overral_machines_dict:
-                overral_machines_dict[machineState.type][0] += 1
-                overral_machines_dict[machineState.type][1] += machineState.noload
-                overral_machines_dict[machineState.type][2] += machineState.underload
-                overral_machines_dict[machineState.type][3] += machineState.offtime
-            else:
-                overral_machines_dict[machineState.type] = [1, machineState.noload, machineState.underload, machineState.offtime]
+            if self.machines[machine].isConnected:
+                machineID.append(self.machines[machine].ID)
+                machineState = self.machines[machine].state
+                state_machines.append(machineState)
+                if machineState.type in overral_machines_dict:
+                    overral_machines_dict[machineState.type][0] += 1
+                    overral_machines_dict[machineState.type][1] += machineState.noload
+                    overral_machines_dict[machineState.type][2] += machineState.underload
+                    overral_machines_dict[machineState.type][3] += machineState.offtime
+                else:
+                    overral_machines_dict[machineState.type] = [1, machineState.noload, machineState.underload, machineState.offtime]
 
         # Tính số giờ theo từng loại máy
         overral_machines = []
@@ -538,7 +554,7 @@ class PlcService(Node):
 
         msg = MachinesStateStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
-        msg.machines_quantity = len(self.machines)
+        msg.machines_quantity = len(machineID)
         msg.types_quantity = len(overral_machines_dict)
         msg.id_machines = machineID
         msg.state_machines = state_machines

@@ -1,9 +1,10 @@
-import time
+import math
 import rclpy
 from rclpy.node import Node
 import sqlite3
 import datetime
-from mcprotocol import Type1E
+# from mcprotocol import Type1E
+from .mcprotocol.type1e import Type1E
 
 from std_msgs.msg import Empty
 from vdm_cokhi_machine_msgs.msg import MachineState, MachineStateArray
@@ -14,8 +15,8 @@ class PlcService(Node):
     def __init__(self):
         super().__init__('PLC_mitsu_ros')
         # Cấu hình các thông số quan trọng:
-        self.IP_addres_PLC = '192.168.1.1'
-        self.port_addres_PLC = 8501
+        self.IP_addres_PLC = '192.168.1.250'
+        self.port_addres_PLC = 8000
         self.maximumDates = 365
         self.plc_model = 'FX3U'
 
@@ -23,15 +24,15 @@ class PlcService(Node):
         self.pyPLC.connect(self.IP_addres_PLC, self.port_addres_PLC)
 
         # Database path:
-        self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'    
-        # self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        # self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'    
+        self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
         self.machine_info = self.get_machines_inform_db()
 
         # Ros Services:
-        self.resetMachine_srv = self.create_service(ResetMachinePLC, 'reset_machine_plc_fx', self.reset_machine_cb)
+        self.resetMachine_srv = self.create_service(ResetMachinePLC, '/reset_machine_plc_fx', self.reset_machine_cb)
 
         # Ros pub, sub:
         # Publishers:
@@ -44,31 +45,37 @@ class PlcService(Node):
         #------ Address all device -------:
         ## System data:
         ## Clock resgister:
-            # year(0-99):       CM700
-            # month(1-12):      CM701
-            # day(1-31):        CM702
-            # hour(0-23):       CM703
-            # minute(0-59):     CM704
-            # second(0-59):     CM705
-            # day-of-week(0-6): CM706 (0: sunday, 1: monday, 2: tuesday, 3: wednesday, 4: thursday, 5: friday, 6: saturday)    
-        self.clock_res = ['CM100',7]
+            # year(0-99):       D700
+            # month(1-12):      D701
+            # day(1-31):        D702
+            # hour(0-23):       D703
+            # minute(0-59):     D704
+            # second(0-59):     D705
+            # day-of-week(0-6): D706 (0: sunday, 1: monday, 2: tuesday, 3: wednesday, 4: thursday, 5: friday, 6: saturday)    
+        self.clock_res = ['D700',7]
 
-        self.save_data_bit = ['M100',1]
+        self.save_data_bit = ['M0',1]
 
         self.password = '10064'
-        self.password_write_res = ['D100',1]
+        self.password_write_res = ['D500',1]
 
-        self.reset_bit = ['M101',1]
+        self.reset_bit = ['M2000',1]
         # self.reset_machine_bit = ['MR',1000,'.U',1]
         # self.max_bit_reset = 15
         # self.reset_change_bit = ['MR',1100, '.U',1]
-        self.reset_machine_res = ['D100',1]
+        self.reset_machine_res = ['D510',1]
         # self.reset_separate = 0
 
         ## Realtime data:
         self.dataMachine_length = 4
         self.separateMachine = 6
-        self.dataMachines_res = ['D100',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        if len(self.machine_info['PLC_address']) > 0:
+            self.isPLCRun = True
+            self.dataMachines_res = ['D1500',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        else:
+            self.isPLCRun = False
+            self.dataMachines_res = ['D1500',1]
+        # self.dataMachines_res = ['D1500',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
         self.dataMachine_res_structure = {
             'signalLight': [1,0],
             'noload': [1,1],
@@ -92,7 +99,7 @@ class PlcService(Node):
             'fatalErr': 'Something is wrong, please check all system!'
         }
 
-        timer_period = 0.2
+        timer_period = 0.5
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
 
@@ -167,36 +174,54 @@ class PlcService(Node):
 
 
     def reset_machine_cb(self, request: ResetMachinePLC.Request, response: ResetMachinePLC.Response):
-        self.get_logger().info(f'Receiv req machine: {request.name}')
-
-        self.pyPLC.batchwrite_wordunits(self.reset_machine_res[0],
-                                            [request.plc_address]) 
-        self.pyPLC.batchwrite_wordunits(self.password_write_res[0],
-                                            [request.password]) 
-        self.pyPLC.batchwrite_bitunits(self.reset_bit[0],[1])
-        a = 0
-        resetOK = False
-        while not resetOK:
-            resetOK = not self.pyPLC.batchread_bitunits(self.reset_bit[0],
-                                                        self.reset_bit[1])[0]
-            if a >= 1200:
-                response.success = False
-                response.status = self.status['resetErr']
-                return response
-            a += 1
-
-        response.success = resetOK
+        if not self.isPLCRun:
+            response.success = False
+            response.status = self.status['resetErr']
+            return response
+        self.get_logger().info(f'Reset machine: {request.name}, '
+                               f'PLC model: {self.plc_model}, PLC address: {request.plc_address}')
         
-        # else:
-        #     response.success = False
-        #     response.status = self.status['socketErr']
+        # self.get_logger().info(f'Receiv req machine: {request.name}')
+
+        if self.check_password(request.password):
+            self.pyPLC.batchwrite_wordunits(self.reset_machine_res[0],
+                                                [request.plc_address])
+            self.pyPLC.batchwrite_wordunits(self.password_write_res[0],
+                                                [int(request.password)])
+            self.pyPLC.batchwrite_bitunits(self.reset_bit[0],[1])
+            a = 0
+            resetOK = False
+            while not resetOK:
+                resetOK = not self.pyPLC.batchread_bitunits(self.reset_bit[0],
+                                                            self.reset_bit[1])[0]
+                if a >= 1200:
+                    response.success = False
+                    response.status = self.status['resetErr']
+                    return response
+                a += 1
+
+            response.success = resetOK
+
+        else:
+            response.success = False
+            response.status = self.status['passErr']
 
         return response
+
+    def check_password(self, passwordCheck):
+        if passwordCheck == self.password:
+            return True
+        return False
 
 
     def update_machineInfo(self, msg: Empty):
         self.machine_info = self.get_machines_inform_db()
-        self.dataMachines_res = [self.dataMachines_res[0], (self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        if len(self.machine_info['PLC_address']) > 0:
+            self.isPLCRun = True
+            self.dataMachines_res = [self.dataMachines_res[0],
+                                     (self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        else:
+            self.isPLCRun = False
         return
     
     def handleSaveData(self,data):
@@ -220,13 +245,22 @@ class PlcService(Node):
     
     
     def timer_callback(self):
-        if not self.machine_info: return
+        if (not self.machine_info
+            or not self.isPLCRun):
+            return
 
         saveDataBit = self.pyPLC.batchread_bitunits(self.save_data_bit[0],
                                                     self.save_data_bit[1])[0]
-
-        dataMachines = self.pyPLC.batchread_wordunits(self.dataMachines_res[0],
-                                                      self.dataMachines_res[1])
+        dataMachines = []
+        count = math.ceil(self.dataMachines_res[1] / 64)
+        remainRes = self.dataMachines_res[1]
+        for i in range(count):
+            headDevice = f"{self.dataMachines_res[0][0]}{int(self.dataMachines_res[0][1:]) + 64*i}"
+            if remainRes >= 64:
+                dataMachines += self.pyPLC.batchread_wordunits(headDevice, 64)
+            else:
+                dataMachines += self.pyPLC.batchread_wordunits(headDevice, remainRes)
+            remainRes -= 64
         
         if saveDataBit:
             self.handleSaveData(dataMachines)
@@ -234,7 +268,7 @@ class PlcService(Node):
         
         state_machines = []
         for i in range(0,self.machine_info['quantity']):
-            j = self.machine_info['PLC_address'][i] * (self.dataMachine_length + self.separateMachine)
+            j = (self.machine_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
             machineState = MachineState()
             machineState.name = self.machine_info['machineName'][i]
             machineState.type = self.machine_info['machineType'][i]

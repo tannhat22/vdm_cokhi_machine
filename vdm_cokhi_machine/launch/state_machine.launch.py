@@ -17,7 +17,7 @@ def generate_launch_description():
     	    XMLLaunchDescriptionSource(os.path.join(launch_dir, 'rosbridge_websocket_launch.xml')),
             launch_arguments = {
                 "port": "9090",
-                "address": "192.168.1.2",
+                "address": "192.168.1.69",
             }.items(),
         ),
 

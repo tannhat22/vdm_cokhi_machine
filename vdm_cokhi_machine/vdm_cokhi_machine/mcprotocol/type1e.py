@@ -1,8 +1,8 @@
 import re
 import socket
 import binascii
-import mcprotocolerror
-import mcprotocolconst as const
+from . import mcprotocolerror
+from . import mcprotocolconst as const
 
 
 def get_device_number(device):

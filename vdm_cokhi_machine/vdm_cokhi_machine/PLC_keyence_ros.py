@@ -23,18 +23,18 @@ class PlcService(Node):
         self._is_connected = False
         while self._is_connected == False:
             self._is_connected = self.socket_connect(self.IP_addres_PLC, self.port_addres_PLC)
-        time.sleep(1.0)
+        # time.sleep(1.0)
 
         # Database path:
-        self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'    
-        # self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        # self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'    
+        self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
         self.machine_info = self.get_machines_inform_db()
 
         # Ros Services:
-        self.resetMachine_srv = self.create_service(ResetMachinePLC, 'reset_machine_plc_kv', self.reset_machine_cb)
+        self.resetMachine_srv = self.create_service(ResetMachinePLC, '/reset_machine_plc_kv', self.reset_machine_cb)
 
         # Ros pub, sub:
         # Publishers:
@@ -71,7 +71,12 @@ class PlcService(Node):
         ## Realtime data:
         self.dataMachine_length = 4
         self.separateMachine = 6
-        self.dataMachines_res = ['DM',1014,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        if len(self.machine_info['PLC_address']) > 0:
+            self.isPLCRun = True
+            self.dataMachines_res = ['DM',1014,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        else:
+            self.isPLCRun = False
+            self.dataMachines_res = ['DM',1014,'.U',1]
         self.dataMachine_res_structure = {
             'signalLight': [1,0],
             'noload': [1,1],
@@ -95,7 +100,7 @@ class PlcService(Node):
             'fatalErr': 'Something is wrong, please check all system!'
         }
 
-        timer_period = 0.2
+        timer_period = 0.5
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
 
@@ -170,48 +175,68 @@ class PlcService(Node):
 
 
     def reset_machine_cb(self, request: ResetMachinePLC.Request, response: ResetMachinePLC.Response):
-        self.get_logger().info(f'Receiv req machine: {request.name}')
+        if not self.isPLCRun:
+            response.success = False
+            response.status = self.status['resetErr']
+            return response
+        self.get_logger().info(f'Reset machine: {request.name}, '
+                            f'PLC model: {self.plc_model}, PLC address: {request.plc_address}')
+        # self.get_logger().info(f'Receiv req machine: {request.name}')
 
-        if (self.write_device(self.reset_machine_res[0],
-                            self.reset_machine_res[1],
-                            self.reset_machine_res[2],
-                            self.reset_machine_res[3],
-                            [request.plc_address]) and
-            self.write_device(self.password_write_res[0],
-                            self.password_write_res[1],
-                            self.password_write_res[2],
-                            self.password_write_res[3],
-                            [request.password]) and
-            self.write_device(self.reset_bit[0],
-                            self.reset_bit[1],
-                            self.reset_bit[2],
-                            self.reset_bit[3],
-                            [1])):
-            a = 0
-            resetOK = False
-            while not resetOK: 
-                resetOK = not self.read_device(self.reset_bit[0],
-                                            self.reset_bit[1],
-                                            self.reset_bit[2],
-                                            self.reset_bit[3])[0]
-                if a >= 1200:
-                    response.success = False
-                    response.status = self.status['resetErr']
-                    return response
-                a += 1
+        if self.check_password(request.password):
+            if (self.write_device(self.reset_machine_res[0],
+                                self.reset_machine_res[1],
+                                self.reset_machine_res[2],
+                                self.reset_machine_res[3],
+                                [request.plc_address]) and
+                self.write_device(self.password_write_res[0],
+                                self.password_write_res[1],
+                                self.password_write_res[2],
+                                self.password_write_res[3],
+                                [request.password]) and
+                self.write_device(self.reset_bit[0],
+                                self.reset_bit[1],
+                                self.reset_bit[2],
+                                self.reset_bit[3],
+                                [1])):
+                a = 0
+                resetOK = False
+                while not resetOK: 
+                    resetOK = not self.read_device(self.reset_bit[0],
+                                                self.reset_bit[1],
+                                                self.reset_bit[2],
+                                                self.reset_bit[3])[0]
+                    if a >= 1200:
+                        response.success = False
+                        response.status = self.status['resetErr']
+                        return response
+                    a += 1
 
-            response.success = resetOK
-        
+                response.success = resetOK
+            
+            else:
+                response.success = False
+                response.status = self.status['socketErr']
         else:
             response.success = False
-            response.status = self.status['socketErr']
+            response.status = self.status['passErr']
 
         return response
 
+    def check_password(self, passwordCheck):
+        if passwordCheck == self.password:
+            return True
+        return False
 
     def update_machineInfo(self, msg: Empty):
         self.machine_info = self.get_machines_inform_db()
-        self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        if len(self.machine_info['PLC_address']) > 0:
+            self.isPLCRun = True
+            self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',
+                                     (self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        else:
+            self.isPLCRun = False
+        # self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
         return
     
     def handleSaveData(self,data):
@@ -256,7 +281,7 @@ class PlcService(Node):
             dataRecv = self.soc.recv(4096)
             dataRecvDec = dataRecv.decode()
             dataResp = dataRecvDec.split(' ')
-            self.get_logger().warn(f'len data: {len(dataResp)}')
+            # self.get_logger().warn(f'len data: {len(dataResp)}')
             dataResp[len(dataResp)-1] = dataResp[len(dataResp)-1][:-2]
             for i in range (0,len(dataResp)):
                 dataResp[i] = int(dataResp[i])
@@ -306,7 +331,9 @@ class PlcService(Node):
     
     
     def timer_callback(self):
-        if not self.machine_info: return
+        if (not self.machine_info
+            or not self.isPLCRun):
+            return
 
         saveDataBit = self.read_device(self.save_data_bit[0],
                                       self.save_data_bit[1],
@@ -327,7 +354,8 @@ class PlcService(Node):
         
         state_machines = []
         for i in range(0,self.machine_info['quantity']):
-            j = self.machine_info['PLC_address'][i] * (self.dataMachine_length + self.separateMachine)
+            j = (self.machine_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
+            # self.get_logger().info(f"Thong so j: {j}")
             machineState = MachineState()
             machineState.name = self.machine_info['machineName'][i]
             machineState.type = self.machine_info['machineType'][i]
