@@ -4,14 +4,31 @@ import sqlite3
 from collections import Counter
 
 from std_msgs.msg import Empty
-from vdm_cokhi_machine_msgs.msg import OverralMachine, MachineState, MachineStateArray, MachinesStateStamped
-from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, ResetMachine, ResetMachinePLC
+from vdm_cokhi_machine_msgs.msg import OverralMachine, MachineState, \
+                                        MachineStateArray, MachinesStateStamped, MachineData
+from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, GetStageData
 from vdm_cokhi_machine_msgs.srv import CreateMachine, UpdateMachine, DeleteMachine
 
 
+# class Machine:
+#     def __init__(self, idMachines: int,
+#                  machineName: str, machineType: str,
+#                  PLC_model: str, PLC_address: str):
+#         self.idMachines = idMachines
+#         self.machineName = machineName
+#         self.machineType = machineType
+#         self.PLC_model = PLC_model
+#         self.PLC_address = PLC_address
+
+# class MachinesInfo:
+#     def __init__(self, quantity: int = 0, machines: list[Machine] = []):
+#         self.quantity = quantity
+#         self.machines = machines
+
 class State:
-    def __init__(self, ID: int = 0, state: MachineState = None):
+    def __init__(self, ID: int = 0, type: str = "", state: MachineState = None):
         self.ID = ID
+        self.type = type
         self.state = state
         self.isConnected = False
 
@@ -20,8 +37,8 @@ class PlcService(Node):
         super().__init__('PC_service_ros')
         # Cấu hình các thông số quan trọng:
         self.maximumDates = 365
-        self.plc_keyence = 'KV-5500'
-        self.plc_mitsu = 'FX3U'
+        # self.plc_keyence = 'KV-5500'
+        # self.plc_mitsu = 'FX3U'
         self.machines = {}
 
         # Database path:
@@ -34,12 +51,14 @@ class PlcService(Node):
         self.machines_info = self.get_machines_inform_db()
         if self.machines_info:
             for i in range(self.machines_info['quantity']):
-                self.machines[self.machines_info['machineName'][i]] = State(ID=self.machines_info['idMachines'][i])
+                self.machines[self.machines_info['machineName'][i]] = State(ID=self.machines_info['idMachines'][i],
+                                                                            type=self.machines_info['machineType'][i])
 
         # Ros Services
         # Server:
         self.getAllMachineName_srv = self.create_service(GetAllMachineName, 'get_all_machine_name', self.get_all_machine_name_cb)
         self.getMachineData_srv = self.create_service(GetMachineData, 'get_machine_data', self.get_machine_data_cb)
+        self.getStageData_srv = self.create_service(GetStageData, 'get_stage_data', self.get_stage_data_cb)
         # self.resetMachine_srv = self.create_service(ResetMachine, 'reset_machine', self.reset_machine_cb)
         self.createMachine_srv = self.create_service(CreateMachine, 'create_machine', self.create_machine_cb)
         self.updateMachine_srv = self.create_service(UpdateMachine, 'update_machine', self.update_machine_cb)
@@ -124,7 +143,6 @@ class PlcService(Node):
         try:
             self.cur.execute("SELECT * from " + self.tableName)
             rows = self.cur.fetchall()
-            # num = 0
             result = {
                 'quantity': 0,
                 'idMachines': [],
@@ -140,8 +158,12 @@ class PlcService(Node):
                 result['machineType'].append(row[2])
                 result['PLC_model'].append(row[3])
                 result['PLC_address'].append(row[4])
-                # num += 1
-            # result['quantity'] = num
+
+            # result = MachinesInfo()
+            # for row in rows:
+            #     machine = Machine(row[0], row[1], row[2], row[3], row[4])
+            #     result.quantity += 1
+            #     result.machines.append(machine)
             # self.types_info = self.array_type_to_dict(result['machineType'])
             return result
         except Exception as e:
@@ -175,6 +197,17 @@ class PlcService(Node):
             print(e)
             self.get_logger().info(f'Exeption: {e}')
             return False      
+
+    # Lấy tất cả tên của machine trong bảng dựa vào thông số đầu vào là stage: 
+    def get_machines_name_in_stage_db(self, stage):
+        try:
+            self.cur.execute("SELECT NAME FROM " + self.tableName + " WHERE TYPE = ?",(stage,))
+            machinesName = self.cur.fetchall()
+            return machinesName
+        except Exception as e:
+            print(e)
+            self.get_logger().info(f'Exeption: {e}')
+            return False
 
     # Lấy dữ liệu theo ngày của một máy từ database
     def get_history_machine_db(self, tableName):
@@ -363,13 +396,41 @@ class PlcService(Node):
         
         response.success = True
         response.status = self.status['success']
-        response.dates = dataHistory['dates'][i:]
-        response.noload = dataHistory['noload'][i:]
-        response.underload = dataHistory['underload'][i:]
-        response.offtime = dataHistory['offtime'][i:]
+        response.machine_data.machine_name = machineName
+        response.machine_data.dates = dataHistory['dates'][i:]
+        response.machine_data.noload = dataHistory['noload'][i:]
+        response.machine_data.underload = dataHistory['underload'][i:]
+        response.machine_data.offtime = dataHistory['offtime'][i:]
 
         return response
 
+    # Lấy dữ liệu của một công đoạn dựa trên yêu cầu loại công đoạn và số ngày cần lấy
+    def get_stage_data_cb(self, request: GetStageData.Request, response: GetStageData.Response):
+        machinesInStage = self.get_machines_name_in_stage_db(request.stage)
+        if not machinesInStage:
+            return response
+        # self.get_logger().info(f"Machine name length in stage: {machinesInStage}")
+        for name in machinesInStage:
+            # Lấy dữ liệu ngày từ database:
+            dataHistory = self.get_history_machine_db(name[0])
+            if not dataHistory: 
+                return response
+            i = 0
+            if (dataHistory['totalDays'] > request.days):
+                i = dataHistory['totalDays'] - request.days
+
+            machineData = MachineData()
+            machineData.machine_name = name[0]
+            machineData.dates = dataHistory['dates'][i:]
+            machineData.noload = dataHistory['noload'][i:]
+            machineData.underload = dataHistory['underload'][i:]
+            machineData.offtime = dataHistory['offtime'][i:]
+            response.machines_data.append(machineData)
+        
+        response.success = True
+        response.status = self.status['success']
+
+        return response
 
 
     # def reset_machine_cb(self, request: ResetMachine.Request, response: ResetMachine.Response):
@@ -492,9 +553,17 @@ class PlcService(Node):
     def update_machineInfo(self):
         self.machines_info = self.get_machines_inform_db()
         if self.machines_info:
+            # Xóa đối tượng machine nếu nó không còn tại
+            for key in self.machines:
+                if key not in self.machines_info['machineName']:
+                    self.machines.pop(key)
+
+            # Thêm một đối tượng machine mới
             for i in range(self.machines_info['quantity']):
                 if self.machines_info['machineName'][i] not in self.machines:
-                    self.machines[self.machines_info['machineName'][i]] = State(ID=self.machines_info['idMachines'][i])
+                    self.machines[self.machines_info['machineName'][i]] = State(ID=self.machines_info['idMachines'][i],
+                                                                                type=self.machines_info['machineType'][i])
+            
         msg = Empty()
         self.pub_update_database.publish(msg)
         return

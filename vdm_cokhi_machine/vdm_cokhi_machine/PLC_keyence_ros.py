@@ -13,11 +13,25 @@ from vdm_cokhi_machine_msgs.srv import ResetMachinePLC
 class PlcService(Node):
     def __init__(self):
         super().__init__('PLC_keyence_ros')
+        # Params:
         # Cấu hình các thông số quan trọng:
-        self.IP_addres_PLC = '192.168.1.1'
-        self.port_addres_PLC = 8501
-        self.maximumDates = 365
-        self.plc_model = 'KV-5500'
+        self.declare_parameter('PLC_model','KV-5500')
+        self.declare_parameter('PLC_IP_address','192.168.1.1')
+        self.declare_parameter('PLC_Port_address',8501)
+        self.declare_parameter('maximum_dates',365)
+        # self.declare_parameter('reset_service','/reset_machine_plc_kv')
+
+
+        self.IP_addres_PLC = self.get_parameter('PLC_IP_address').value
+        self.port_addres_PLC = self.get_parameter('PLC_Port_address').value
+        self.maximumDates = self.get_parameter('maximum_dates').value
+        self.plc_model = self.get_parameter('PLC_model').value
+        self.reset_service_name = "/reset_machine_" + self.plc_model
+
+
+        self.get_logger().info(f"PLC model: {self.plc_model}")
+        self.get_logger().info(f"PLC IP address: {self.IP_addres_PLC}")
+        self.get_logger().info(f"PLC Port address: {self.port_addres_PLC}")
 
         self.soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._is_connected = False
@@ -34,7 +48,7 @@ class PlcService(Node):
         self.machine_info = self.get_machines_inform_db()
 
         # Ros Services:
-        self.resetMachine_srv = self.create_service(ResetMachinePLC, '/reset_machine_plc_kv', self.reset_machine_cb)
+        self.resetMachine_srv = self.create_service(ResetMachinePLC, self.reset_service_name, self.reset_machine_cb)
 
         # Ros pub, sub:
         # Publishers:
@@ -248,7 +262,7 @@ class PlcService(Node):
         date = datetime.datetime(2000 + dataClock[0],dataClock[1],dataClock[2],dataClock[3],dataClock[4],dataClock[5])
 
         for i in range(0,self.machine_info['quantity']):
-            j = self.machine_info['PLC_address'][i] * (self.dataMachine_length + self.separateMachine)
+            j = (self.machine_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
             name = self.machine_info['machineName'][i]
             noload = data[j + self.dataMachine_res_structure['noload'][1]]
             underload = data[j + self.dataMachine_res_structure['underload'][1]]
@@ -346,6 +360,7 @@ class PlcService(Node):
                                         self.dataMachines_res[3])
         
         if saveDataBit:
+            self.get_logger().info("Signal save data trigger!")
             self.handleSaveData(dataMachines)
             self.write_device(self.save_data_bit[0],
                               self.save_data_bit[1],

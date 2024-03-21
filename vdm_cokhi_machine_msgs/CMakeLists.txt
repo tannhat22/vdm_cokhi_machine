@@ -11,22 +11,24 @@ find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 set(msg_files
-  "msg/OverralMachine.msg"
-  "msg/ResetMachinePLC.msg"
+  "msg/MachineData.msg"
+  "msg/MachinesStateStamped.msg"
   "msg/MachineState.msg"
   "msg/MachineStateArray.msg"
-  "msg/MachinesStateStamped.msg"
+  "msg/OverralMachine.msg"
+  "msg/ResetMachinePLC.msg"
   "msg/ValueSetting.msg"
 )
 
 set(srv_files
+  "srv/CreateMachine.srv"
+  "srv/DeleteMachine.srv"
   "srv/GetAllMachineName.srv"
   "srv/GetMachineData.srv"
+  "srv/GetStageData.srv"
   "srv/ResetMachine.srv"
   "srv/ResetMachinePLC.srv"
-  "srv/CreateMachine.srv"
   "srv/UpdateMachine.srv"
-  "srv/DeleteMachine.srv"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}

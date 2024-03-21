@@ -1,6 +1,6 @@
-int32 id_machine
+string stage
 int32 days
 ---
 bool success
 string status
-MachineData machine_data
+MachineData[] machines_data
