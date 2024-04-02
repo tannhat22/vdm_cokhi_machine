@@ -77,7 +77,7 @@ def generate_launch_description():
             parameters=[
                 {
                     'port': 9090,
-                    'address': '192.168.47.163',
+                    'address': '192.168.48.247',
                     'retry_startup_delay': 5.0,
                     'fragment_timeout': 600,
                     'delay_between_messages': 0,
