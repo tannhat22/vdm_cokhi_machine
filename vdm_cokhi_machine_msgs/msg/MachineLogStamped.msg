@@ -1,0 +1,2 @@
+string date
+MachineLog[] logs

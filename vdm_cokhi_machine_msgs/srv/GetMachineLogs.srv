@@ -1,0 +1,6 @@
+int32 id_machine
+int32 days
+---
+bool success
+string status
+MachineLogStamped[] machine_logs

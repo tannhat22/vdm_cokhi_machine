@@ -1,13 +1,14 @@
 import rclpy
 from rclpy.node import Node
 import sqlite3
+import datetime
 from collections import Counter
 
 from std_msgs.msg import Empty
-from vdm_cokhi_machine_msgs.msg import OverralMachine, MachineState, \
-                                        MachineStateArray, MachinesStateStamped, MachineData
-from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, GetStageData
-from vdm_cokhi_machine_msgs.srv import CreateMachine, UpdateMachine, DeleteMachine
+from vdm_cokhi_machine_msgs.msg import OverralMachine, MachineState, MachineStateArray, \
+                                       MachinesStateStamped, MachineData, MachineLog, MachineLogStamped
+from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, GetStageData, \
+                                       GetMachineLogs, CreateMachine, UpdateMachine, DeleteMachine
 
 
 # class Machine:
@@ -59,6 +60,7 @@ class PlcService(Node):
         self.getAllMachineName_srv = self.create_service(GetAllMachineName, 'get_all_machine_name', self.get_all_machine_name_cb)
         self.getMachineData_srv = self.create_service(GetMachineData, 'get_machine_data', self.get_machine_data_cb)
         self.getStageData_srv = self.create_service(GetStageData, 'get_stage_data', self.get_stage_data_cb)
+        self.getLogsData_srv = self.create_service(GetMachineLogs, 'get_logs_data', self.get_machine_logs_cb)
         # self.resetMachine_srv = self.create_service(ResetMachine, 'reset_machine', self.reset_machine_cb)
         self.createMachine_srv = self.create_service(CreateMachine, 'create_machine', self.create_machine_cb)
         self.updateMachine_srv = self.create_service(UpdateMachine, 'update_machine', self.update_machine_cb)
@@ -121,6 +123,7 @@ class PlcService(Node):
             if len(rows) > 0:
                 for row in rows:
                     self.create_table_machine_history_db(row[1])
+                    self.create_table_machine_logs_db(row[1])
         except Exception as e:
             print(Exception)
         return
@@ -131,9 +134,21 @@ class PlcService(Node):
             self.cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName +
             ''' (ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                  DATE TIMESTAMP NOT NULL,
+                 SHIFT TEXT NOT NULL,
                  NOLOAD INTEGER NOT NULL,
                  UNDERLOAD INTEGER NOT NULL,
                  OFFTIME INTEGER NOT NULL);''')
+        except Exception as e:
+            print(Exception)
+        return
+
+    # Tạo bảng database logs cho máy được cài đặt nếu chưa có:
+    def create_table_machine_logs_db(self, tableName):
+        try:
+            self.cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName+'_logs' +
+            ''' (ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                 DATE TIMESTAMP NOT NULL,
+                 STATE TEXT NOT NULL);''')
         except Exception as e:
             print(Exception)
         return
@@ -218,6 +233,7 @@ class PlcService(Node):
             result = {
                 'totalDays': 0,
                 'dates': [],
+                'shifts': [],
                 'noload': [],
                 'underload': [],
                 'offtime': []
@@ -226,11 +242,44 @@ class PlcService(Node):
                 result['totalDays'] +=1
                 result['dates'].append(row[1])
                 # result['dates'].append(row[1].date().strftime("%m/%d/%Y"))
-                result['noload'].append(row[2]) 
-                result['underload'].append(row[3])
-                result['offtime'].append(row[4])
+                result['shifts'].append(row[2])
+                result['noload'].append(row[3]) 
+                result['underload'].append(row[4])
+                result['offtime'].append(row[5])
 
             return result
+        except Exception as e:
+            self.get_logger().info(f'{e}')
+            return False
+        
+    # Lấy dữ liệu logging theo ngày của một máy từ database
+    def get_logs_machine_db(self, tableName):
+        try:
+            # self.get_logger().info(f'machine name: {tableName}')
+            self.cur.execute("SELECT * from " + tableName)
+            rows = self.cur.fetchall()
+            result = {}
+            # lastDate = datetime.datetime.now()
+            for row in rows:
+                date = row[1].strftime("%d-%m-%Y")
+                logMsg = MachineLog()
+                logMsg.time = row[1].strftime("%H:%M:%S")
+                logMsg.description = row[2]
+                if date not in result:
+                    result[date] = [logMsg]
+                else:
+                    result[date].append(logMsg)
+                # lastDate = row[1]
+
+            # if len(result) > 180:
+            #     # Tính toán ngày 180 ngày trước từ ngày hiện tại
+            #     dateLimit = lastDate - datetime.timedelta(days=180)
+            #     self.cur.execute("DELETE FROM " + tableName + "_logs WHERE DATE < ?", (date_limit,))
+
+
+
+            return result
+        
         except Exception as e:
             self.get_logger().info(f'{e}')
             return False
@@ -240,6 +289,7 @@ class PlcService(Node):
         try:
             self.cur.execute("INSERT INTO " + self.tableName + " (NAME, TYPE, PLC, ADDRESS) VALUES (?, ?, ?, ?)", (name, type, plc, address))
             self.create_table_machine_history_db(name)
+            self.create_table_machine_logs_db(name)
             self.conn.commit()
             return True
         except Exception as e:
@@ -247,25 +297,25 @@ class PlcService(Node):
             return False
     
     # Thêm dữ liệu ngày mới vào bảng database:
-    def add_history_data_db(self, tableName, date, noLoad, underLoad, offtime):
-        try:
-            self.cur.execute("SELECT * from " + tableName)
-            totalDates = len(self.cur.fetchall())
-            if totalDates >= self.maximumDates:
-                self.cur.execute("DELETE FROM " + tableName + " WHERE ID = 1")
-                self.cur.execute("CREATE TABLE momenttable AS SELECT * FROM " + tableName)
-                self.cur.execute("DELETE FROM " + tableName)
-                self.cur.execute("DELETE FROM sqlite_sequence WHERE name='" + tableName + "'")
-                self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD, OFFTIME) SELECT DATE, NOLOAD, UNDERLOAD, OFFTIME FROM momenttable")
-                self.delete_table("momenttable")
-                self.conn.commit()
+    # def add_history_data_db(self, tableName, date, noLoad, underLoad, offtime):
+    #     try:
+    #         self.cur.execute("SELECT * from " + tableName)
+    #         totalDates = len(self.cur.fetchall())
+    #         if totalDates >= self.maximumDates:
+    #             self.cur.execute("DELETE FROM " + tableName + " WHERE ID = 1")
+    #             self.cur.execute("CREATE TABLE momenttable AS SELECT * FROM " + tableName)
+    #             self.cur.execute("DELETE FROM " + tableName)
+    #             self.cur.execute("DELETE FROM sqlite_sequence WHERE name='" + tableName + "'")
+    #             self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD, OFFTIME) SELECT DATE, NOLOAD, UNDERLOAD, OFFTIME FROM momenttable")
+    #             self.delete_table("momenttable")
+    #             self.conn.commit()
             
-            self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD, OFFTIME) VALUES (?, ?, ?, ?)", (date, noLoad, underLoad, offtime))
-            self.conn.commit()
-            return True
-        except Exception as e:
-            print(e)
-            return False
+    #         self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD, OFFTIME) VALUES (?, ?, ?, ?)", (date, noLoad, underLoad, offtime))
+    #         self.conn.commit()
+    #         return True
+    #     except Exception as e:
+    #         print(e)
+    #         return False
 
     # Sửa tên bảng trong database:
     def update_table_name(self, tableOldName, tableNewName):
@@ -284,7 +334,8 @@ class PlcService(Node):
     def update_machine_db(self, id, newName, newType, newPLC, newAddress):
         try:
             machineName = self.get_machine_name_db(id)
-            if self.update_table_name(machineName, newName):
+            if (self.update_table_name(machineName, newName) and
+                self.update_table_name(machineName+'_logs', newName+'_logs')):
                 self.cur.execute("UPDATE " + self.tableName + " SET NAME = ?, TYPE = ?, PLC = ?, ADDRESS = ? WHERE ID = ?",
                                  (newName, newType, newPLC, newAddress, id))
                 self.conn.commit()
@@ -308,7 +359,8 @@ class PlcService(Node):
     def delete_machine_db(self, id):
         try:
             machineName = self.get_machine_name_db(id)
-            if self.delete_table(machineName):
+            if (self.delete_table(machineName) and
+                self.delete_table(machineName+'_logs')):
                 self.cur.execute("DELETE FROM " + self.tableName + " WHERE ID = ?", (id,))
                 self.conn.commit()
                 return True
@@ -401,6 +453,37 @@ class PlcService(Node):
         response.machine_data.noload = dataHistory['noload'][i:]
         response.machine_data.underload = dataHistory['underload'][i:]
         response.machine_data.offtime = dataHistory['offtime'][i:]
+
+        return response
+
+    # Lấy dữ liệu logging của một máy dựa trên yêu cầu ID và số ngày cần lấy
+    def get_machine_logs_cb(self, request: GetMachineLogs.Request, response: GetMachineLogs.Response):
+        # if not self.machine_info:
+        #     response.success = False
+        #     response.status = self.status['dbErr']
+        #     return response
+        
+        # Lấy dữ liệu logging từ database:
+        machineName = self.get_machine_name_db(request.id_machine)
+        dataLogs = self.get_logs_machine_db(machineName+'_logs')
+        if not dataLogs:
+            return response
+
+        # Lấy tổng số ngày đã lưu và lọc ngày dựa trên yêu cầu
+        # i = 0
+        # if (len(dataLogs) > request.days):
+        #     i = len(dataLogs) - request.days
+        
+        machineLogs = []
+        for date in dataLogs:
+            logDate = MachineLogStamped()
+            logDate.date = date
+            logDate.logs = dataLogs[date]
+            machineLogs.append(logDate)
+
+        response.success = True
+        response.status = self.status['success']
+        response.machine_logs = machineLogs
 
         return response
 

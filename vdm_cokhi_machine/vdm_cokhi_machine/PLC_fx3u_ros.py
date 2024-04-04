@@ -3,13 +3,16 @@ import rclpy
 from rclpy.node import Node
 import sqlite3
 import datetime
-# from mcprotocol import Type1E
 from .mcprotocol.type1e import Type1E
 
 from std_msgs.msg import Empty
 from vdm_cokhi_machine_msgs.msg import MachineState, MachineStateArray
 from vdm_cokhi_machine_msgs.srv import ResetMachinePLC
 
+class State:
+    def __init__(self, ID: int = 0, signalLight: int = 4):
+        self.ID = ID
+        self.signalLight = signalLight
 
 class PlcService(Node):
     def __init__(self):
@@ -44,7 +47,11 @@ class PlcService(Node):
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
-        self.machine_info = self.get_machines_inform_db()
+        self.machines_info = self.get_machines_inform_db()
+        self.machines = {}
+        if self.machines_info:
+            for i in range(self.machines_info['quantity']):
+                self.machines[self.machines_info['machineName'][i]] = State(ID=self.machines_info['idMachines'][i])
 
         # Ros Services:
         self.resetMachine_srv = self.create_service(ResetMachinePLC, self.reset_service_name, self.reset_machine_cb)
@@ -70,6 +77,7 @@ class PlcService(Node):
         self.clock_res = ['D700',7]
 
         self.save_data_bit = ['M0',1]
+        self.shift_res = ['D1',1]
 
         self.password = '10064'
         self.password_write_res = ['D500',1]
@@ -84,13 +92,13 @@ class PlcService(Node):
         ## Realtime data:
         self.dataMachine_length = 4
         self.separateMachine = 6
-        if len(self.machine_info['PLC_address']) > 0:
+        if len(self.machines_info['PLC_address']) > 0:
             self.isPLCRun = True
-            self.dataMachines_res = ['D1500',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+            self.dataMachines_res = ['D1500',(self.dataMachine_length + self.separateMachine) * self.machines_info['PLC_address'][-1]]
         else:
             self.isPLCRun = False
             self.dataMachines_res = ['D1500',1]
-        # self.dataMachines_res = ['D1500',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        # self.dataMachines_res = ['D1500',(self.dataMachine_length + self.separateMachine) * self.machines_info['PLC_address'][-1]]
         self.dataMachine_res_structure = {
             'signalLight': [1,0],
             'noload': [1,1],
@@ -113,7 +121,12 @@ class PlcService(Node):
             'socketErr': 'Lỗi kết nối Raspberry và PLC!',
             'fatalErr': 'Something is wrong, please check all system!'
         }
-
+        # Biến này sẽ nhận giá trị thời gian thực từ PLC:
+        self.dayShift = [datetime.time(hour=6, minute=0, second=0),
+                         datetime.time(hour=17, minute=59, second=59)]
+        self.nightShift = [datetime.time(hour=18, minute=0, second=0),
+                         datetime.time(hour=5, minute=59, second=59)]
+        
         timer_period = 0.5
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
@@ -167,7 +180,7 @@ class PlcService(Node):
 
     
     # Thêm dữ liệu ngày mới vào bảng database:
-    def add_history_data_db(self, tableName, date, noLoad, underLoad, offtime):
+    def add_history_data_db(self, tableName, date, shift, noLoad, underLoad, offtime):
         try:
             self.cur.execute("SELECT * from " + tableName)
             totalDates = len(self.cur.fetchall())
@@ -176,17 +189,32 @@ class PlcService(Node):
                 self.cur.execute("CREATE TABLE momenttable AS SELECT * FROM " + tableName)
                 self.cur.execute("DELETE FROM " + tableName)
                 self.cur.execute("DELETE FROM sqlite_sequence WHERE name='" + tableName + "'")
-                self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD, OFFTIME) SELECT DATE, NOLOAD, UNDERLOAD, OFFTIME FROM momenttable")
+                self.cur.execute("INSERT INTO " + tableName + " (DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME) SELECT DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME FROM momenttable")
                 self.delete_table("momenttable")
                 self.conn.commit()
             
-            self.cur.execute("INSERT INTO " + tableName + " (DATE, NOLOAD, UNDERLOAD, OFFTIME) VALUES (?, ?, ?, ?)", (date, noLoad, underLoad, offtime))
+            self.cur.execute("INSERT INTO " + tableName + " (DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME) VALUES (?, ?, ?, ?)", (date, shift, noLoad, underLoad, offtime))
             self.conn.commit()
             return True
         except Exception as e:
             print(e)
             return False
 
+    # Thêm dữ liệu logs mới vào bảng database:
+    def add_logs_data_db(self, tableName, clock, state):
+        try:
+            self.cur.execute("SELECT COUNT(*) from " + tableName)
+            totalRow = self.cur.fetchone()[0]
+            if totalRow > 36000:
+                self.cur.execute("DELETE FROM " + tableName + " WHERE ROWID = (SELECT MIN(ROWID) FROM " + tableName + ")")
+                self.conn.commit()
+            
+            self.cur.execute("INSERT INTO " + tableName + " (DATE, STATE) VALUES (?, ?)", (clock, state))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(e)
+            return False
 
     def reset_machine_cb(self, request: ResetMachinePLC.Request, response: ResetMachinePLC.Response):
         if not self.isPLCRun:
@@ -230,28 +258,28 @@ class PlcService(Node):
 
 
     def update_machineInfo(self, msg: Empty):
-        self.machine_info = self.get_machines_inform_db()
-        if len(self.machine_info['PLC_address']) > 0:
+        self.machines_info = self.get_machines_inform_db()
+        if len(self.machines_info['PLC_address']) > 0:
             self.isPLCRun = True
             self.dataMachines_res = [self.dataMachines_res[0],
-                                     (self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+                                     (self.dataMachine_length + self.separateMachine) * self.machines_info['PLC_address'][-1]]
         else:
             self.isPLCRun = False
         return
     
-    def handleSaveData(self,data):
+    def handleSaveData(self, data, shift):
         dataClock = self.pyPLC.batchread_wordunits(self.clock_res[0],
                                                    self.clock_res[1])
 
         date = datetime.datetime(2000 + dataClock[0],dataClock[1],dataClock[2],dataClock[3],dataClock[4],dataClock[5])
 
-        for i in range(0,self.machine_info['quantity']):
-            j = (self.machine_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
-            name = self.machine_info['machineName'][i]
+        for i in range(0,self.machines_info['quantity']):
+            j = (self.machines_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
+            name = self.machines_info['machineName'][i]
             noload = data[j + self.dataMachine_res_structure['noload'][1]]
             underload = data[j + self.dataMachine_res_structure['underload'][1]]
             offtime = data[j + self.dataMachine_res_structure['offtime'][1]]
-            if not self.add_history_data_db(name,date,noload,underload,offtime):
+            if not self.add_history_data_db(name,date,shift,noload,underload,offtime):
                 self.get_logger().info("ERROR: Save data of day error!!!")
                 return False
         
@@ -260,12 +288,26 @@ class PlcService(Node):
     
     
     def timer_callback(self):
-        if (not self.machine_info
+        if (not self.machines_info
             or not self.isPLCRun):
             return
 
         saveDataBit = self.pyPLC.batchread_bitunits(self.save_data_bit[0],
                                                     self.save_data_bit[1])[0]
+        
+        dataClock = self.pyPLC.batchread_wordunits(self.clock_res[0],
+                                                   self.clock_res[1])
+
+        realTimePLc = datetime.datetime(2000 + dataClock[0],dataClock[1],dataClock[2],
+                                             dataClock[3],dataClock[4],dataClock[5])
+        
+
+        # CN-06:00:00-17:59:59, CD-18:00:00:-05:59:59
+        if self.dayShift[0] <= realTimePLc.time() <= self.dayShift[1]:
+            shiftNow = MachineStateArray.DAY_SHIFT
+        else:
+            shiftNow = MachineStateArray.NIGHT_SHIFT
+
         dataMachines = []
         count = math.ceil(self.dataMachines_res[1] / 64)
         remainRes = self.dataMachines_res[1]
@@ -279,26 +321,31 @@ class PlcService(Node):
         
         if saveDataBit:
             # self.get_logger().info("Signal save data trigger!")
-            self.handleSaveData(dataMachines)
+            if shiftNow == MachineStateArray.DAY_SHIFT:
+                self.handleSaveData(data=dataMachines, shift="CN")
+            elif shiftNow == MachineStateArray.NIGHT_SHIFT:
+                self.handleSaveData(data=dataMachines, shift="CD")
             self.pyPLC.batchwrite_bitunits(self.save_data_bit[0],[0])
         
         state_machines = []
-        for i in range(0,self.machine_info['quantity']):
-            j = (self.machine_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
+        for i in range(0,self.machines_info['quantity']):
+            j = (self.machines_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
             machineState = MachineState()
-            machineState.name = self.machine_info['machineName'][i]
-            machineState.type = self.machine_info['machineType'][i]
+            machineState.name = self.machines_info['machineName'][i]
+            machineState.type = self.machines_info['machineType'][i]
             machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
             machineState.noload = dataMachines[j + self.dataMachine_res_structure['noload'][1]]
             machineState.underload = dataMachines[j + self.dataMachine_res_structure['underload'][1]]
             machineState.offtime = dataMachines[j + self.dataMachine_res_structure['offtime'][1]]
-            # machineState.value_setting.min = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1]]
-            # machineState.value_setting.max = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 1]
-            # machineState.value_setting.current = dataMachines[j + self.dataMachine_res_structure['valueSetting'][1] + 2]
-            # machineState.time_reachspeed = dataMachines[j + self.dataMachine_res_structure['timeReachSpeed'][1]]
             state_machines.append(machineState)
 
+            if machineState.signal_light != self.machines[machineState.name].signalLight:
+                self.machines[machineState.name].signalLight = machineState.signal_light
+                self.add_logs_data_db(machineState.name + '_logs',
+                                      realTimePLc, machineState.signal_light)
+
         msg = MachineStateArray()
+        msg.shift = shiftNow
         msg.state_machines = state_machines
         self.pub_state_machine.publish(msg)
 

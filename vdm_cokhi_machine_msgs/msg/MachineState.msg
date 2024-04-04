@@ -1,3 +1,8 @@
+uint8 MACHINE_OFF = 0
+uint8 MACHINE_UNDERLOAD = 1
+uint8 MACHINE_NOLOAD = 2
+uint8 MACHINE_OVERLOAD = 3
+
 string name
 string type
 int32 signal_light

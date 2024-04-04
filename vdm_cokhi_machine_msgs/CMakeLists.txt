@@ -12,6 +12,8 @@ find_package(rosidl_default_generators REQUIRED)
 
 set(msg_files
   "msg/MachineData.msg"
+  "msg/MachineLog.msg"
+  "msg/MachineLogStamped.msg"
   "msg/MachinesStateStamped.msg"
   "msg/MachineState.msg"
   "msg/MachineStateArray.msg"
@@ -25,6 +27,7 @@ set(srv_files
   "srv/DeleteMachine.srv"
   "srv/GetAllMachineName.srv"
   "srv/GetMachineData.srv"
+  "srv/GetMachineLogs.srv"
   "srv/GetStageData.srv"
   "srv/ResetMachine.srv"
   "srv/ResetMachinePLC.srv"

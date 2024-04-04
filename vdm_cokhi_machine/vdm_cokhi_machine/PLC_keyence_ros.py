@@ -45,7 +45,7 @@ class PlcService(Node):
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
-        self.machine_info = self.get_machines_inform_db()
+        self.machines_info = self.get_machines_inform_db()
 
         # Ros Services:
         self.resetMachine_srv = self.create_service(ResetMachinePLC, self.reset_service_name, self.reset_machine_cb)
@@ -85,9 +85,9 @@ class PlcService(Node):
         ## Realtime data:
         self.dataMachine_length = 4
         self.separateMachine = 6
-        if len(self.machine_info['PLC_address']) > 0:
+        if len(self.machines_info['PLC_address']) > 0:
             self.isPLCRun = True
-            self.dataMachines_res = ['DM',1014,'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+            self.dataMachines_res = ['DM',1014,'.U',(self.dataMachine_length + self.separateMachine) * self.machines_info['PLC_address'][-1]]
         else:
             self.isPLCRun = False
             self.dataMachines_res = ['DM',1014,'.U',1]
@@ -243,14 +243,14 @@ class PlcService(Node):
         return False
 
     def update_machineInfo(self, msg: Empty):
-        self.machine_info = self.get_machines_inform_db()
-        if len(self.machine_info['PLC_address']) > 0:
+        self.machines_info = self.get_machines_inform_db()
+        if len(self.machines_info['PLC_address']) > 0:
             self.isPLCRun = True
             self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',
-                                     (self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+                                     (self.dataMachine_length + self.separateMachine) * self.machines_info['PLC_address'][-1]]
         else:
             self.isPLCRun = False
-        # self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',(self.dataMachine_length + self.separateMachine) * self.machine_info['PLC_address'][-1]]
+        # self.dataMachines_res = ['DM',self.dataMachines_res[1],'.U',(self.dataMachine_length + self.separateMachine) * self.machines_info['PLC_address'][-1]]
         return
     
     def handleSaveData(self,data):
@@ -261,9 +261,9 @@ class PlcService(Node):
 
         date = datetime.datetime(2000 + dataClock[0],dataClock[1],dataClock[2],dataClock[3],dataClock[4],dataClock[5])
 
-        for i in range(0,self.machine_info['quantity']):
-            j = (self.machine_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
-            name = self.machine_info['machineName'][i]
+        for i in range(0,self.machines_info['quantity']):
+            j = (self.machines_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
+            name = self.machines_info['machineName'][i]
             noload = data[j + self.dataMachine_res_structure['noload'][1]]
             underload = data[j + self.dataMachine_res_structure['underload'][1]]
             offtime = data[j + self.dataMachine_res_structure['offtime'][1]]
@@ -345,7 +345,7 @@ class PlcService(Node):
     
     
     def timer_callback(self):
-        if (not self.machine_info
+        if (not self.machines_info
             or not self.isPLCRun):
             return
 
@@ -368,12 +368,12 @@ class PlcService(Node):
                               self.save_data_bit[3],[0])
         
         state_machines = []
-        for i in range(0,self.machine_info['quantity']):
-            j = (self.machine_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
+        for i in range(0,self.machines_info['quantity']):
+            j = (self.machines_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
             # self.get_logger().info(f"Thong so j: {j}")
             machineState = MachineState()
-            machineState.name = self.machine_info['machineName'][i]
-            machineState.type = self.machine_info['machineType'][i]
+            machineState.name = self.machines_info['machineName'][i]
+            machineState.type = self.machines_info['machineType'][i]
             machineState.signal_light = dataMachines[j + self.dataMachine_res_structure['signalLight'][1]]
             machineState.noload = dataMachines[j + self.dataMachine_res_structure['noload'][1]]
             machineState.underload = dataMachines[j + self.dataMachine_res_structure['underload'][1]]
