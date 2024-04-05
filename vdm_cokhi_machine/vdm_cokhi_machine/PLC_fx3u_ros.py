@@ -3,6 +3,7 @@ import rclpy
 from rclpy.node import Node
 import sqlite3
 import datetime
+import os
 from .mcprotocol.type1e import Type1E
 
 from std_msgs.msg import Empty
@@ -42,8 +43,9 @@ class PlcService(Node):
         self.pyPLC.connect(self.IP_addres_PLC, self.port_addres_PLC)
 
         # Database path:
-        # self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
-        self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        self.database_path = os.path.join(os.path.expanduser("~"),
+                             'ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db') 
+        # self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
@@ -77,7 +79,6 @@ class PlcService(Node):
         self.clock_res = ['D700',7]
 
         self.save_data_bit = ['M0',1]
-        self.shift_res = ['D1',1]
 
         self.password = '10064'
         self.password_write_res = ['D500',1]
@@ -121,7 +122,7 @@ class PlcService(Node):
             'socketErr': 'Lỗi kết nối Raspberry và PLC!',
             'fatalErr': 'Something is wrong, please check all system!'
         }
-        # Biến này sẽ nhận giá trị thời gian thực từ PLC:
+        # Thời gian của các ca:
         self.dayShift = [datetime.time(hour=6, minute=0, second=0),
                          datetime.time(hour=17, minute=59, second=59)]
         self.nightShift = [datetime.time(hour=18, minute=0, second=0),
@@ -182,15 +183,19 @@ class PlcService(Node):
     # Thêm dữ liệu ngày mới vào bảng database:
     def add_history_data_db(self, tableName, date, shift, noLoad, underLoad, offtime):
         try:
-            self.cur.execute("SELECT * from " + tableName)
-            totalDates = len(self.cur.fetchall())
+            # self.cur.execute("SELECT * from " + tableName)
+            # totalDates = len(self.cur.fetchall())
+            self.cur.execute("SELECT COUNT(*) from " + tableName)
+            totalDates = self.cur.fetchone()[0]
+
             if totalDates >= self.maximumDates:
-                self.cur.execute("DELETE FROM " + tableName + " WHERE ID = 1")
-                self.cur.execute("CREATE TABLE momenttable AS SELECT * FROM " + tableName)
-                self.cur.execute("DELETE FROM " + tableName)
-                self.cur.execute("DELETE FROM sqlite_sequence WHERE name='" + tableName + "'")
-                self.cur.execute("INSERT INTO " + tableName + " (DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME) SELECT DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME FROM momenttable")
-                self.delete_table("momenttable")
+                self.cur.execute("DELETE FROM " + tableName + " WHERE ROWID = (SELECT MIN(ROWID) FROM " + tableName + ")")
+                # self.cur.execute("DELETE FROM " + tableName + " WHERE ID = 1")
+                # self.cur.execute("CREATE TABLE momenttable AS SELECT * FROM " + tableName)
+                # self.cur.execute("DELETE FROM " + tableName)
+                # self.cur.execute("DELETE FROM sqlite_sequence WHERE name='" + tableName + "'")
+                # self.cur.execute("INSERT INTO " + tableName + " (DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME) SELECT DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME FROM momenttable")
+                # self.delete_table("momenttable")
                 self.conn.commit()
             
             self.cur.execute("INSERT INTO " + tableName + " (DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME) VALUES (?, ?, ?, ?)", (date, shift, noLoad, underLoad, offtime))
@@ -205,7 +210,7 @@ class PlcService(Node):
         try:
             self.cur.execute("SELECT COUNT(*) from " + tableName)
             totalRow = self.cur.fetchone()[0]
-            if totalRow > 36000:
+            if totalRow > 30000:
                 self.cur.execute("DELETE FROM " + tableName + " WHERE ROWID = (SELECT MIN(ROWID) FROM " + tableName + ")")
                 self.conn.commit()
             
@@ -267,11 +272,13 @@ class PlcService(Node):
             self.isPLCRun = False
         return
     
-    def handleSaveData(self, data, shift):
-        dataClock = self.pyPLC.batchread_wordunits(self.clock_res[0],
-                                                   self.clock_res[1])
-
-        date = datetime.datetime(2000 + dataClock[0],dataClock[1],dataClock[2],dataClock[3],dataClock[4],dataClock[5])
+    def handleSaveData(self, data, shift, clockRes):
+        if shift == MachineStateArray.DAY_SHIFT:
+            date = datetime.datetime(2000 + clockRes[0],clockRes[1],clockRes[2],6,0,0)
+            shiftDes = "CN"
+        elif shift == MachineStateArray.NIGHT_SHIFT:
+            date = datetime.datetime(2000 + clockRes[0],clockRes[1],clockRes[2],18,0,0) - datetime.timedelta(days=1)
+            shiftDes = "CD"
 
         for i in range(0,self.machines_info['quantity']):
             j = (self.machines_info['PLC_address'][i] - 1) * (self.dataMachine_length + self.separateMachine)
@@ -279,7 +286,7 @@ class PlcService(Node):
             noload = data[j + self.dataMachine_res_structure['noload'][1]]
             underload = data[j + self.dataMachine_res_structure['underload'][1]]
             offtime = data[j + self.dataMachine_res_structure['offtime'][1]]
-            if not self.add_history_data_db(name,date,shift,noload,underload,offtime):
+            if not self.add_history_data_db(name,date,shiftDes,noload,underload,offtime):
                 self.get_logger().info("ERROR: Save data of day error!!!")
                 return False
         
@@ -320,11 +327,8 @@ class PlcService(Node):
             remainRes -= 64
         
         if saveDataBit:
-            # self.get_logger().info("Signal save data trigger!")
-            if shiftNow == MachineStateArray.DAY_SHIFT:
-                self.handleSaveData(data=dataMachines, shift="CN")
-            elif shiftNow == MachineStateArray.NIGHT_SHIFT:
-                self.handleSaveData(data=dataMachines, shift="CD")
+            self.get_logger().info("Signal save data trigger!")
+            self.handleSaveData(data=dataMachines, shift=shiftNow, clockRes=dataClock)
             self.pyPLC.batchwrite_bitunits(self.save_data_bit[0],[0])
         
         state_machines = []
@@ -358,6 +362,7 @@ def main(args=None):
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
+    plc_service.conn.close()
     plc_service.destroy_node()
     rclpy.shutdown()
 

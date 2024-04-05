@@ -3,6 +3,7 @@ from rclpy.node import Node
 import sqlite3
 import datetime
 from collections import Counter
+import os
 
 from std_msgs.msg import Empty
 from vdm_cokhi_machine_msgs.msg import OverralMachine, MachineState, MachineStateArray, \
@@ -43,8 +44,9 @@ class PlcService(Node):
         self.machines = {}
 
         # Database path:
-        # self.database_path = '/home/tannhat/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'  
-        self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
+        self.database_path = os.path.join(os.path.expanduser("~"),
+                             'ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db') 
+        # self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINES'
         self.conn = sqlite3.connect(self.database_path)
         self.cur = self.conn.cursor()
@@ -240,8 +242,8 @@ class PlcService(Node):
             }
             for row in rows:
                 result['totalDays'] +=1
-                result['dates'].append(row[1])
-                # result['dates'].append(row[1].date().strftime("%m/%d/%Y"))
+                # result['dates'].append(row[1])
+                result['dates'].append(row[1].strftime("%d/%m/%Y"))
                 result['shifts'].append(row[2])
                 result['noload'].append(row[3]) 
                 result['underload'].append(row[4])
@@ -450,6 +452,7 @@ class PlcService(Node):
         response.status = self.status['success']
         response.machine_data.machine_name = machineName
         response.machine_data.dates = dataHistory['dates'][i:]
+        response.machine_data.shift = dataHistory['shifts'][i:]
         response.machine_data.noload = dataHistory['noload'][i:]
         response.machine_data.underload = dataHistory['underload'][i:]
         response.machine_data.offtime = dataHistory['offtime'][i:]
@@ -493,6 +496,8 @@ class PlcService(Node):
         if not machinesInStage:
             return response
         # self.get_logger().info(f"Machine name length in stage: {machinesInStage}")
+        
+        stageRawData = MachineData()
         for name in machinesInStage:
             # Lấy dữ liệu ngày từ database:
             dataHistory = self.get_history_machine_db(name[0])
@@ -505,10 +510,37 @@ class PlcService(Node):
             machineData = MachineData()
             machineData.machine_name = name[0]
             machineData.dates = dataHistory['dates'][i:]
+            machineData.shift = dataHistory['shifts'][i:]
             machineData.noload = dataHistory['noload'][i:]
             machineData.underload = dataHistory['underload'][i:]
             machineData.offtime = dataHistory['offtime'][i:]
             response.machines_data.append(machineData)
+
+            stageRawData.dates += dataHistory['dates'][i:]
+            stageRawData.shift += dataHistory['shifts'][i:]
+            stageRawData.noload += dataHistory['noload'][i:]
+            stageRawData.underload += dataHistory['underload'][i:]
+            stageRawData.offtime += dataHistory['offtime'][i:]
+
+        k = len(stageRawData.dates)
+        stageIndex = {}
+        stageData = MachineData()
+        stageData.machine_name = request.stage
+        for i in range(0,k):
+            keyTime = f"{stageRawData.dates[i]}-{stageRawData.shift}"
+            if keyTime not in stageIndex:
+                stageIndex[keyTime] = len(stageData.dates)
+                stageData.dates.append(stageRawData.dates[i])
+                stageData.shift.append(stageRawData.shift[i])
+                stageData.noload.append(stageRawData.noload[i])
+                stageData.underload.append(stageRawData.underload[i])
+                stageData.offtime.append(stageRawData.offtime[i])
+            else:
+                stageData.noload[stageIndex[keyTime]] += stageRawData.noload[i]
+                stageData.underload[stageIndex[keyTime]] += stageRawData.underload[i]
+                stageData.offtime[stageIndex[keyTime]] += stageRawData.offtime[i]
+
+        response.machines_data.append(stageData)
         
         response.success = True
         response.status = self.status['success']
@@ -716,13 +748,14 @@ class PlcService(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    plc_service = PlcService()
-    rclpy.spin(plc_service)
+    pc_service = PlcService()
+    rclpy.spin(pc_service)
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
-    plc_service.destroy_node()
+    pc_service.conn.close()
+    pc_service.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
