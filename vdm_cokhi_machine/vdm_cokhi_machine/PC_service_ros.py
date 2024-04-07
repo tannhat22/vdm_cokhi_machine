@@ -105,6 +105,9 @@ class PlcService(Node):
             'fatalErr': 'Something is wrong, please check all system!'
         }
 
+        # Variables:
+        self.shiftNow = MachineStateArray.DAY_SHIFT
+
         timer_period = 0.5
         self.timer = self.create_timer(timer_period, self.timer_callback)
         self.get_logger().info("is running!!!!!!!!!!")
@@ -698,6 +701,7 @@ class PlcService(Node):
     
 
     def state_machine_cb(self, msg: MachineStateArray):
+        self.shiftNow = msg.shift
         for state in msg.state_machines:
             if state.name in self.machines:
                 self.machines[state.name].state = state
@@ -738,6 +742,7 @@ class PlcService(Node):
 
         msg = MachinesStateStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
+        msg.shift = self.shiftNow
         msg.machines_quantity = len(machineID)
         msg.types_quantity = len(overral_machines_dict)
         msg.id_machines = machineID
