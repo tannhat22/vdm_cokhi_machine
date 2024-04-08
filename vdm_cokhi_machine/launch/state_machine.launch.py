@@ -67,48 +67,48 @@ def generate_launch_description():
         ),
 
         # Rosbrige wlan:
-        Node(
-            package='rosbridge_server',
-            namespace='',
-            executable='rosbridge_websocket',
-            name='rosbridge_websocket_wlan',
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                {
-                    'port': 9090,
-                    'address': '192.168.48.247',
-                    'retry_startup_delay': 5.0,
-                    'fragment_timeout': 600,
-                    'delay_between_messages': 0,
-                    'max_message_size': 10000000,
-                    'unregister_timeout': 10.0,
-                    'use_compression': False,
-                    'call_services_in_new_thread': False,
-                    'send_action_goals_in_new_thread': False,
-                    'topics_glob': '',
-                    'services_glob': '',
-                    'params_glob': '',
-                    'bson_only_mode': False,
-                }
-            ]
-        ),
+        # Node(
+        #     package='rosbridge_server',
+        #     namespace='',
+        #     executable='rosbridge_websocket',
+        #     name='rosbridge_websocket_wlan',
+        #     output="screen",
+        #     emulate_tty=True,
+        #     parameters=[
+        #         {
+        #             'port': 9090,
+        #             'address': '192.168.48.247',
+        #             'retry_startup_delay': 5.0,
+        #             'fragment_timeout': 600,
+        #             'delay_between_messages': 0,
+        #             'max_message_size': 10000000,
+        #             'unregister_timeout': 10.0,
+        #             'use_compression': False,
+        #             'call_services_in_new_thread': False,
+        #             'send_action_goals_in_new_thread': False,
+        #             'topics_glob': '',
+        #             'services_glob': '',
+        #             'params_glob': '',
+        #             'bson_only_mode': False,
+        #         }
+        #     ]
+        # ),
 
-        Node(
-            package='rosapi',
-            namespace='',
-            executable='rosapi_node',
-            name='rosapi_wlan',
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                {
-                    'topics_glob': '',
-                    'services_glob': '',
-                    'params_glob': '',
-                }
-            ]
-        ),
+        # Node(
+        #     package='rosapi',
+        #     namespace='',
+        #     executable='rosapi_node',
+        #     name='rosapi_wlan',
+        #     output="screen",
+        #     emulate_tty=True,
+        #     parameters=[
+        #         {
+        #             'topics_glob': '',
+        #             'services_glob': '',
+        #             'params_glob': '',
+        #         }
+        #     ]
+        # ),
 
         # Node control service data:
         Node(

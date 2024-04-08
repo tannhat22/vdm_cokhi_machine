@@ -48,7 +48,9 @@ class PlcService(Node):
                              'ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db') 
         # self.database_path = '/home/raspberry/ros2_ws/src/vdm_cokhi_machine/vdm_cokhi_machine/database/machine.db'
         self.tableName = 'MACHINES'
-        self.conn = sqlite3.connect(self.database_path)
+        self.conn = sqlite3.connect(self.database_path,
+                                    detect_types=sqlite3.PARSE_DECLTYPES |
+                                                 sqlite3.PARSE_COLNAMES)
         self.cur = self.conn.cursor()
         self.create_table_group_machines_db(self.tableName)
         self.machines_info = self.get_machines_inform_db()
@@ -107,6 +109,8 @@ class PlcService(Node):
 
         # Variables:
         self.shiftNow = MachineStateArray.DAY_SHIFT
+        self.dayShift = [datetime.time(hour=6, minute=0, second=0),
+                         datetime.time(hour=17, minute=59, second=59)]
 
         timer_period = 0.5
         self.timer = self.create_timer(timer_period, self.timer_callback)
@@ -152,7 +156,8 @@ class PlcService(Node):
         try:
             self.cur.execute('CREATE TABLE IF NOT EXISTS ' + tableName+'_logs' +
             ''' (ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                 DATE TIMESTAMP NOT NULL,
+                 DATE TEXT NOT NULL,
+                 TIME TEXT NOT NULL,
                  STATE TEXT NOT NULL);''')
         except Exception as e:
             print(Exception)
@@ -258,36 +263,59 @@ class PlcService(Node):
             return False
         
     # Lấy dữ liệu logging theo ngày của một máy từ database
-    def get_logs_machine_db(self, tableName):
+    def get_logs_machine_db(self, tableName, minDate: str = "",
+                            maxDate: str = "", shift: str = ""):
         try:
             # self.get_logger().info(f'machine name: {tableName}')
-            self.cur.execute("SELECT * from " + tableName)
+            minDateObj = self.text_to_date(minDate)
+            maxDateObj = self.text_to_date(maxDate)
+
+            if shift != "":
+                self.cur.execute("SELECT * from " + tableName + " WHERE DATE = ?",(maxDate,))
+            else:
+                self.cur.execute("SELECT * from " + tableName)
+                # self.cur.execute("SELECT * from " + tableName + " WHERE DATE >= ? AND DATE <= ?",(minDate, maxDate))
             rows = self.cur.fetchall()
             result = {}
             # lastDate = datetime.datetime.now()
             for row in rows:
-                date = row[1].strftime("%d-%m-%Y")
+                # date = row[1].strftime("%d/%m/%Y")
+                timeObj = self.text_to_time(row[2])
                 logMsg = MachineLog()
-                logMsg.time = row[1].strftime("%H:%M:%S")
-                logMsg.description = row[2]
-                if date not in result:
-                    result[date] = [logMsg]
+                if (shift == 'CN' and
+                    (self.dayShift[0] <= timeObj <= self.dayShift[1])):
+                    logMsg.time = row[2]
+                    # logMsg.time = row[2].strftime("%H:%M:%S")
+                    logMsg.description = row[3]
+                    if row[1] not in result:
+                        result[row[1]] = [logMsg]
+                    else:
+                        result[row[1]].append(logMsg)
+                elif (shift == 'CD' and
+                      (timeObj < self.dayShift[0] or timeObj > self.dayShift[1])):
+                    logMsg.time = row[2]
+                    # logMsg.time = row[2].strftime("%H:%M:%S")
+                    logMsg.description = row[3]
+                    if row[1] not in result:
+                        result[row[1]] = [logMsg]
+                    else:
+                        result[row[1]].append(logMsg)
                 else:
-                    result[date].append(logMsg)
-                # lastDate = row[1]
-
-            # if len(result) > 180:
-            #     # Tính toán ngày 180 ngày trước từ ngày hiện tại
-            #     dateLimit = lastDate - datetime.timedelta(days=180)
-            #     self.cur.execute("DELETE FROM " + tableName + "_logs WHERE DATE < ?", (date_limit,))
-
-
+                    date = self.text_to_date(row[1]) 
+                    if minDateObj <= date <= maxDateObj:
+                        logMsg.time = row[2]
+                        # logMsg.time = row[2].strftime("%H:%M:%S")
+                        logMsg.description = row[3]
+                        if row[1] not in result:
+                            result[row[1]] = [logMsg]
+                        else:
+                            result[row[1]].append(logMsg)
 
             return result
         
         except Exception as e:
             self.get_logger().info(f'{e}')
-            return False
+            return None
 
     # Tạo thêm máy mới vào database
     def add_machine_db(self, name, type, plc, address):
@@ -471,8 +499,11 @@ class PlcService(Node):
         
         # Lấy dữ liệu logging từ database:
         machineName = self.get_machine_name_db(request.id_machine)
-        dataLogs = self.get_logs_machine_db(machineName+'_logs')
-        if not dataLogs:
+        dataLogs = self.get_logs_machine_db(tableName=machineName+'_logs',
+                                            minDate=request.min_date,
+                                            maxDate=request.max_date,
+                                            shift=request.shift)
+        if dataLogs is None:
             return response
 
         # Lấy tổng số ngày đã lưu và lọc ngày dựa trên yêu cầu
@@ -519,11 +550,11 @@ class PlcService(Node):
             machineData.offtime = dataHistory['offtime'][i:]
             response.machines_data.append(machineData)
 
-            stageRawData.dates += dataHistory['dates'][i:]
-            stageRawData.shift += dataHistory['shifts'][i:]
-            stageRawData.noload += dataHistory['noload'][i:]
-            stageRawData.underload += dataHistory['underload'][i:]
-            stageRawData.offtime += dataHistory['offtime'][i:]
+            stageRawData.dates.extend(dataHistory['dates'][i:])
+            stageRawData.shift.extend(dataHistory['shifts'][i:])
+            stageRawData.noload.extend(dataHistory['noload'][i:])
+            stageRawData.underload.extend(dataHistory['underload'][i:])
+            stageRawData.offtime.extend(dataHistory['offtime'][i:])
 
         k = len(stageRawData.dates)
         stageIndex = {}
@@ -698,7 +729,21 @@ class PlcService(Node):
     #     self.future.add_done_callback()
     #     self.get_logger().info("DA chay xong service")
     #     return self.future.result()
-    
+
+    def text_to_date(self, text: str):
+        try:
+            return datetime.datetime.strptime(text, '%d/%m/%Y').date()
+        except ValueError:
+            print("Invalid date format. Please provide the date in DD/MM/YYYY format.")
+            return None
+
+    def text_to_time(self, text: str):
+        try:
+            return datetime.datetime.strptime(text, '%H:%M:%S').time()
+        except ValueError:
+            print("Invalid time format. Please provide the time in HH:MM:SS format.")
+            return None
+
 
     def state_machine_cb(self, msg: MachineStateArray):
         self.shiftNow = msg.shift

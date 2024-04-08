@@ -206,7 +206,17 @@ class PlcService(Node):
             return False
 
     # Thêm dữ liệu logs mới vào bảng database:
-    def add_logs_data_db(self, tableName, clock, state):
+    def add_logs_data_db(self, tableName, clock: datetime.datetime, state):
+        stateDes = ""
+        if state == MachineState.MACHINE_OFF:
+            stateDes = "Tắt máy"
+        elif state == MachineState.MACHINE_NOLOAD:
+            stateDes = "Chạy không tải"
+        elif state == MachineState.MACHINE_UNDERLOAD:
+            stateDes = "Chạy có tải"
+        elif state == MachineState.MACHINE_OVERLOAD:
+            stateDes = "Quá tải"
+
         try:
             self.cur.execute("SELECT COUNT(*) from " + tableName)
             totalRow = self.cur.fetchone()[0]
@@ -214,7 +224,9 @@ class PlcService(Node):
                 self.cur.execute("DELETE FROM " + tableName + " WHERE ROWID = (SELECT MIN(ROWID) FROM " + tableName + ")")
                 self.conn.commit()
 
-            self.cur.execute("INSERT INTO " + tableName + " (DATE, STATE) VALUES (?, ?)", (clock, state))
+            date = clock.strftime("%d/%m/%Y")
+            time = clock.strftime("%H:%M:%S")
+            self.cur.execute("INSERT INTO " + tableName + " (DATE, TIME, STATE) VALUES (?, ?, ?)", (date, time, stateDes))
             self.conn.commit()
             return True
         except Exception as e:
@@ -434,6 +446,7 @@ class PlcService(Node):
 
             if machineState.signal_light != self.machines[machineState.name].signalLight:
                 self.machines[machineState.name].signalLight = machineState.signal_light
+                self.get_logger().info(f"{machineState.name}: has new logging!!!")
                 self.add_logs_data_db(machineState.name + '_logs',
                                       realTimePLc, machineState.signal_light)
 
