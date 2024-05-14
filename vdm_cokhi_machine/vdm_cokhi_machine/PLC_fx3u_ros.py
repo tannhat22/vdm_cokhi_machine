@@ -188,7 +188,7 @@ class PlcService(Node):
             self.cur.execute("SELECT COUNT(*) from " + tableName)
             totalDates = self.cur.fetchone()[0]
 
-            if totalDates >= self.maximumDates:
+            if totalDates >= self.maximumDates * 2:
                 self.cur.execute("DELETE FROM " + tableName + " WHERE ROWID = (SELECT MIN(ROWID) FROM " + tableName + ")")
                 # self.cur.execute("DELETE FROM " + tableName + " WHERE ID = 1")
                 # self.cur.execute("CREATE TABLE momenttable AS SELECT * FROM " + tableName)
@@ -198,7 +198,7 @@ class PlcService(Node):
                 # self.delete_table("momenttable")
                 self.conn.commit()
             
-            self.cur.execute("INSERT INTO " + tableName + " (DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME) VALUES (?, ?, ?, ?)", (date, shift, noLoad, underLoad, offtime))
+            self.cur.execute("INSERT INTO " + tableName + " (DATE, SHIFT, NOLOAD, UNDERLOAD, OFFTIME) VALUES (?, ?, ?, ?, ?)", (date, shift, noLoad, underLoad, offtime))
             self.conn.commit()
             return True
         except Exception as e:
@@ -220,7 +220,7 @@ class PlcService(Node):
         try:
             self.cur.execute("SELECT COUNT(*) from " + tableName)
             totalRow = self.cur.fetchone()[0]
-            if totalRow > 30000:
+            if totalRow > 100000:
                 self.cur.execute("DELETE FROM " + tableName + " WHERE ROWID = (SELECT MIN(ROWID) FROM " + tableName + ")")
                 self.conn.commit()
             
@@ -286,10 +286,10 @@ class PlcService(Node):
     
     def handleSaveData(self, data, shift, clockRes):
         if shift == MachineStateArray.DAY_SHIFT:
-            date = datetime.datetime(2000 + clockRes[0],clockRes[1],clockRes[2],6,0,0)
+            date = datetime.datetime(2000 + clockRes[0],clockRes[1],clockRes[2],clockRes[3],clockRes[4],clockRes[5])
             shiftDes = "CN"
         elif shift == MachineStateArray.NIGHT_SHIFT:
-            date = datetime.datetime(2000 + clockRes[0],clockRes[1],clockRes[2],18,0,0) - datetime.timedelta(days=1)
+            date = datetime.datetime(2000 + clockRes[0],clockRes[1],clockRes[2],clockRes[3],clockRes[4],clockRes[5]) - datetime.timedelta(days=1)
             shiftDes = "CD"
 
         for i in range(0,self.machines_info['quantity']):
@@ -322,7 +322,8 @@ class PlcService(Node):
         
 
         # CN-06:00:00-17:59:59, CD-18:00:00:-05:59:59
-        if self.dayShift[0] <= realTimePLc.time() <= self.dayShift[1]:
+        if (realTimePLc.time() >= self.dayShift[0] and
+            realTimePLc.time() <= self.dayShift[1]):
             shiftNow = MachineStateArray.DAY_SHIFT
         else:
             shiftNow = MachineStateArray.NIGHT_SHIFT
@@ -357,7 +358,7 @@ class PlcService(Node):
 
             if machineState.signal_light != self.machines[machineState.name].signalLight:
                 self.machines[machineState.name].signalLight = machineState.signal_light
-                self.get_logger().info(f"{machineState.name}: has new logging!!!")
+                # self.get_logger().info(f"{machineState.name}: has new logging!!!")
                 self.add_logs_data_db(machineState.name + '_logs',
                                       realTimePLc, machineState.signal_light)
 
@@ -375,6 +376,7 @@ def main(args=None):
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
+    plc_service.pyPLC.close()
     plc_service.conn.close()
     plc_service.destroy_node()
     rclpy.shutdown()

@@ -1,0 +1,6 @@
+string stage
+---
+bool success
+string status
+string min_date
+string max_date

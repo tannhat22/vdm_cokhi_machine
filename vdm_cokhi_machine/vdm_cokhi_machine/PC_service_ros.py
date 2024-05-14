@@ -7,9 +7,11 @@ import os
 
 from std_msgs.msg import Empty
 from vdm_cokhi_machine_msgs.msg import OverralMachine, MachineState, MachineStateArray, \
-                                       MachinesStateStamped, MachineData, MachineLog, MachineLogStamped
+                                       MachinesStateStamped, MachineData, MachineDataStamped, \
+                                       MachineLog, MachineLogStamped
 from vdm_cokhi_machine_msgs.srv import GetAllMachineName, GetMachineData, GetStageData, \
-                                       GetMachineLogs, CreateMachine, UpdateMachine, DeleteMachine
+                                       GetMachineLogs, GetMinMaxDate, CreateMachine, \
+                                       UpdateMachine, DeleteMachine
 
 
 # class Machine:
@@ -65,6 +67,7 @@ class PlcService(Node):
         self.getMachineData_srv = self.create_service(GetMachineData, 'get_machine_data', self.get_machine_data_cb)
         self.getStageData_srv = self.create_service(GetStageData, 'get_stage_data', self.get_stage_data_cb)
         self.getLogsData_srv = self.create_service(GetMachineLogs, 'get_logs_data', self.get_machine_logs_cb)
+        self.getMinMaxDate_srv = self.create_service(GetMinMaxDate, 'get_min_max_date', self.get_min_max_date_cb)
         # self.resetMachine_srv = self.create_service(ResetMachine, 'reset_machine', self.reset_machine_cb)
         self.createMachine_srv = self.create_service(CreateMachine, 'create_machine', self.create_machine_cb)
         self.updateMachine_srv = self.create_service(UpdateMachine, 'update_machine', self.update_machine_cb)
@@ -235,13 +238,19 @@ class PlcService(Node):
             return False
 
     # Lấy dữ liệu theo ngày của một máy từ database
-    def get_history_machine_db(self, tableName):
+    def get_history_machine_db(self, tableName, minDate: str = "",
+                               maxDate: str = "", shift: str = ""):
         try:
+            minDateObj = self.text_to_date(minDate)
+            maxDateObj = self.text_to_date(maxDate)
             # self.get_logger().info(f'machine name: {tableName}')
-            self.cur.execute("SELECT * from " + tableName)
+            if not shift:
+                self.cur.execute("SELECT * from " + tableName)
+            else:
+                self.cur.execute("SELECT * from " + tableName + " WHERE SHIFT = ?",(shift,))
             rows = self.cur.fetchall()
-            result = {
-                'totalDays': 0,
+            msgType = []
+            dictType = {
                 'dates': [],
                 'shifts': [],
                 'noload': [],
@@ -249,18 +258,30 @@ class PlcService(Node):
                 'offtime': []
             }
             for row in rows:
-                result['totalDays'] +=1
-                # result['dates'].append(row[1])
-                result['dates'].append(row[1].strftime("%d/%m/%Y"))
-                result['shifts'].append(row[2])
-                result['noload'].append(row[3]) 
-                result['underload'].append(row[4])
-                result['offtime'].append(row[5])
-
-            return result
+                dataMsg = MachineData()
+                date = row[1].date()
+                if (date >= minDateObj and 
+                    date <= maxDateObj):
+                    # msg ros type
+                    dataMsg.date = row[1].strftime("%d/%m/%Y")
+                    dataMsg.shift = row[2]
+                    dataMsg.noload = row[3]
+                    dataMsg.underload = row[4]
+                    dataMsg.offtime = row[5]
+                    msgType.append(dataMsg)
+                    # list type
+                    dictType['dates'].append(row[1].strftime("%d/%m/%Y"))
+                    dictType['shifts'].append(row[2])
+                    dictType['noload'].append(row[3])
+                    dictType['underload'].append(row[4])
+                    dictType['offtime'].append(row[5])
+            return {
+                'msgType': msgType,
+                'dictType': dictType
+            }
         except Exception as e:
             self.get_logger().info(f'{e}')
-            return False
+            return None
         
     # Lấy dữ liệu logging theo ngày của một máy từ database
     def get_logs_machine_db(self, tableName, minDate: str = "",
@@ -270,8 +291,11 @@ class PlcService(Node):
             minDateObj = self.text_to_date(minDate)
             maxDateObj = self.text_to_date(maxDate)
 
-            if shift != "":
+            if shift == "CN":
                 self.cur.execute("SELECT * from " + tableName + " WHERE DATE = ?",(maxDate,))
+            elif shift == "CD":
+                nightShift = (self.text_to_datetime(maxDate) + datetime.timedelta(days=1)).strftime("%d/%m/%Y")
+                self.cur.execute("SELECT * from " + tableName + " WHERE DATE = ? OR DATE = ?",(maxDate, nightShift))
             else:
                 self.cur.execute("SELECT * from " + tableName)
                 # self.cur.execute("SELECT * from " + tableName + " WHERE DATE >= ? AND DATE <= ?",(minDate, maxDate))
@@ -282,27 +306,32 @@ class PlcService(Node):
                 # date = row[1].strftime("%d/%m/%Y")
                 timeObj = self.text_to_time(row[2])
                 logMsg = MachineLog()
-                if (shift == 'CN' and
-                    (self.dayShift[0] <= timeObj <= self.dayShift[1])):
-                    logMsg.time = row[2]
-                    # logMsg.time = row[2].strftime("%H:%M:%S")
-                    logMsg.description = row[3]
-                    if row[1] not in result:
-                        result[row[1]] = [logMsg]
-                    else:
-                        result[row[1]].append(logMsg)
-                elif (shift == 'CD' and
-                      (timeObj < self.dayShift[0] or timeObj > self.dayShift[1])):
-                    logMsg.time = row[2]
-                    # logMsg.time = row[2].strftime("%H:%M:%S")
-                    logMsg.description = row[3]
-                    if row[1] not in result:
-                        result[row[1]] = [logMsg]
-                    else:
-                        result[row[1]].append(logMsg)
+                if shift == "CN":
+                    if (timeObj >= self.dayShift[0] and
+                        timeObj <= self.dayShift[1]):
+                        logMsg.time = row[2]
+                        # logMsg.time = row[2].strftime("%H:%M:%S")
+                        logMsg.description = row[3]
+                        if row[1] not in result:
+                            result[row[1]] = [logMsg]
+                        else:
+                            result[row[1]].append(logMsg)
+                elif shift == "CD":
+                    if ((row[1] == maxDate and
+                         timeObj > self.dayShift[1]) or
+                        (row[1] == nightShift and
+                         timeObj < self.dayShift[0])):
+                        logMsg.time = row[2]
+                        # logMsg.time = row[2].strftime("%H:%M:%S")
+                        logMsg.description = row[3]
+                        if row[1] not in result:
+                            result[row[1]] = [logMsg]
+                        else:
+                            result[row[1]].append(logMsg)
                 else:
-                    date = self.text_to_date(row[1]) 
-                    if minDateObj <= date <= maxDateObj:
+                    date = self.text_to_date(row[1])
+                    if (date >= minDateObj and 
+                        date <= maxDateObj):
                         logMsg.time = row[2]
                         # logMsg.time = row[2].strftime("%H:%M:%S")
                         logMsg.description = row[3]
@@ -461,7 +490,7 @@ class PlcService(Node):
             response.plc_address = machine_info['PLC_address']
             return response
 
-    # Lấy dữ liệu của một máy dựa trên yêu cầu ID và số ngày cần lấy
+    # Lấy dữ liệu của một máy dựa trên yêu cầu ID và ngày cần lấy
     def get_machine_data_cb(self, request: GetMachineData.Request, response: GetMachineData.Response):
         # if not self.machine_info:
         #     response.success = False
@@ -470,27 +499,23 @@ class PlcService(Node):
         
         # Lấy dữ liệu ngày từ database:
         machineName = self.get_machine_name_db(request.id_machine)
-        dataHistory = self.get_history_machine_db(machineName)
-        if not dataHistory: 
+        dataHistory = self.get_history_machine_db(tableName=machineName,
+                                                  minDate=request.min_date,
+                                                  maxDate=request.max_date,
+                                                  shift=request.shift)
+        if dataHistory is None:
             return response
-
-        # Lấy tổng số ngày đã lưu và lọc ngày dựa trên yêu cầu
-        i = 0
-        if (dataHistory['totalDays'] > request.days):
-            i = dataHistory['totalDays'] - request.days
         
+        machineMsg = MachineDataStamped()
+        machineMsg.machine_name = machineName
+        machineMsg.machine_data = dataHistory['msgType']
+
         response.success = True
         response.status = self.status['success']
-        response.machine_data.machine_name = machineName
-        response.machine_data.dates = dataHistory['dates'][i:]
-        response.machine_data.shift = dataHistory['shifts'][i:]
-        response.machine_data.noload = dataHistory['noload'][i:]
-        response.machine_data.underload = dataHistory['underload'][i:]
-        response.machine_data.offtime = dataHistory['offtime'][i:]
-
+        response.machine_data = machineMsg
         return response
 
-    # Lấy dữ liệu logging của một máy dựa trên yêu cầu ID và số ngày cần lấy
+    # Lấy dữ liệu logging của một máy dựa trên yêu cầu ID và ngày cần lấy
     def get_machine_logs_cb(self, request: GetMachineLogs.Request, response: GetMachineLogs.Response):
         # if not self.machine_info:
         #     response.success = False
@@ -524,63 +549,96 @@ class PlcService(Node):
 
         return response
 
-    # Lấy dữ liệu của một công đoạn dựa trên yêu cầu loại công đoạn và số ngày cần lấy
+    # Lấy dữ liệu của một công đoạn dựa trên yêu cầu loại công đoạn và ngày cần lấy
     def get_stage_data_cb(self, request: GetStageData.Request, response: GetStageData.Response):
         machinesInStage = self.get_machines_name_in_stage_db(request.stage)
         if not machinesInStage:
             return response
         # self.get_logger().info(f"Machine name length in stage: {machinesInStage}")
         
-        stageRawData = MachineData()
+        stageRawData = {
+            'dates': [],
+            'shift': [],
+            'noload': [],
+            'underload': [],
+            'offtime': []
+        }
+        stageData = []
         for name in machinesInStage:
             # Lấy dữ liệu ngày từ database:
-            dataHistory = self.get_history_machine_db(name[0])
-            if not dataHistory: 
+            dataHistory = self.get_history_machine_db(tableName=name[0],
+                                                      minDate=request.min_date,
+                                                      maxDate=request.max_date,
+                                                      shift=request.shift)
+            if dataHistory is None: 
                 return response
-            i = 0
-            if (dataHistory['totalDays'] > request.days):
-                i = dataHistory['totalDays'] - request.days
 
-            machineData = MachineData()
-            machineData.machine_name = name[0]
-            machineData.dates = dataHistory['dates'][i:]
-            machineData.shift = dataHistory['shifts'][i:]
-            machineData.noload = dataHistory['noload'][i:]
-            machineData.underload = dataHistory['underload'][i:]
-            machineData.offtime = dataHistory['offtime'][i:]
-            response.machines_data.append(machineData)
+            machineMsg = MachineDataStamped()
+            machineMsg.machine_name = name[0]
+            machineMsg.machine_data = dataHistory['msgType']
+            stageData.append(machineMsg)
+            stageRawData['dates'].extend(dataHistory['dictType']['dates'])
+            stageRawData['shift'].extend(dataHistory['dictType']['shifts'])
+            stageRawData['noload'].extend(dataHistory['dictType']['noload'])
+            stageRawData['underload'].extend(dataHistory['dictType']['underload'])
+            stageRawData['offtime'].extend(dataHistory['dictType']['offtime'])
 
-            stageRawData.dates.extend(dataHistory['dates'][i:])
-            stageRawData.shift.extend(dataHistory['shifts'][i:])
-            stageRawData.noload.extend(dataHistory['noload'][i:])
-            stageRawData.underload.extend(dataHistory['underload'][i:])
-            stageRawData.offtime.extend(dataHistory['offtime'][i:])
-
-        k = len(stageRawData.dates)
-        stageIndex = {}
-        stageData = MachineData()
-        stageData.machine_name = request.stage
+        k = len(stageRawData['dates'])
+        stageSumData = {}
         for i in range(0,k):
-            keyTime = f"{stageRawData.dates[i]}-{stageRawData.shift}"
-            if keyTime not in stageIndex:
-                stageIndex[keyTime] = len(stageData.dates)
-                stageData.dates.append(stageRawData.dates[i])
-                stageData.shift.append(stageRawData.shift[i])
-                stageData.noload.append(stageRawData.noload[i])
-                stageData.underload.append(stageRawData.underload[i])
-                stageData.offtime.append(stageRawData.offtime[i])
+            keyTime = f"{stageRawData['dates'][i]}-{stageRawData['shift'][i]}"
+            if keyTime not in stageSumData:
+                machineMsg = MachineData()
+                machineMsg.date = stageRawData['dates'][i]
+                machineMsg.shift = stageRawData['shift'][i]
+                machineMsg.noload = stageRawData['noload'][i]
+                machineMsg.underload = stageRawData['underload'][i]
+                machineMsg.offtime = stageRawData['offtime'][i]
+                stageSumData[keyTime] = machineMsg
             else:
-                stageData.noload[stageIndex[keyTime]] += stageRawData.noload[i]
-                stageData.underload[stageIndex[keyTime]] += stageRawData.underload[i]
-                stageData.offtime[stageIndex[keyTime]] += stageRawData.offtime[i]
+                stageSumData[keyTime].noload += stageRawData['noload'][i]
+                stageSumData[keyTime].underload += stageRawData['underload'][i]
+                stageSumData[keyTime].offtime += stageRawData['offtime'][i]
 
-        response.machines_data.append(stageData)
+        machineMsg = MachineDataStamped()
+        machineMsg.machine_name = request.stage
+        machineMsg.machine_data = list(stageSumData.values())
+        stageData.append(machineMsg)
         
         response.success = True
         response.status = self.status['success']
+        response.stage_name = request.stage
+        response.stage_data = stageData
 
         return response
 
+    # Lấy giá trị ngày nhỏ nhất và lớn nhất trong database dựa theo stage
+    def get_min_max_date_cb(self, request: GetMinMaxDate.Request, response: GetMinMaxDate.Response):
+        machinesInStage = self.get_machines_name_in_stage_db(request.stage)
+        if not machinesInStage:
+            return response
+        minDate = datetime.datetime(2200,1,1).date()
+        maxDate = datetime.datetime(2020,1,1).date()
+
+        for name in machinesInStage:
+            # Lấy dữ liệu ngày từ database:
+            dataHistory = self.get_history_machine_db(tableName=name[0],
+                                                      minDate=datetime.datetime(2020,1,1).strftime("%d/%m/%Y"),
+                                                      maxDate=datetime.datetime(2200,1,1).strftime("%d/%m/%Y"))
+            if dataHistory is None:
+                return response
+
+            if self.text_to_date(dataHistory['dictType']['dates'][0]) < minDate:
+                minDate = self.text_to_date(dataHistory['dictType']['dates'][0])
+            
+            if self.text_to_date(dataHistory['dictType']['dates'][-1]) > maxDate:
+                maxDate = self.text_to_date(dataHistory['dictType']['dates'][-1])
+        
+        response.success = True
+        response.status = self.status['success']
+        response.min_date = minDate.strftime("%d/%m/%Y")
+        response.max_date = maxDate.strftime("%d/%m/%Y")
+        return response
 
     # def reset_machine_cb(self, request: ResetMachine.Request, response: ResetMachine.Response):
     #     machine = self.get_machine_inform_db(request.id_machine)
@@ -744,6 +802,12 @@ class PlcService(Node):
             print("Invalid time format. Please provide the time in HH:MM:SS format.")
             return None
 
+    def text_to_datetime(self, text: str):
+        try:
+            return datetime.datetime.strptime(text, '%d/%m/%Y')
+        except ValueError:
+            print("Invalid date format. Please provide the date in DD/MM/YYYY format.")
+            return None
 
     def state_machine_cb(self, msg: MachineStateArray):
         self.shiftNow = msg.shift

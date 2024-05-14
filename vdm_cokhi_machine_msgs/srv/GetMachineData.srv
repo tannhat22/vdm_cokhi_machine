@@ -1,6 +1,8 @@
 int32 id_machine
-int32 days
+string min_date
+string max_date
+string shift
 ---
 bool success
 string status
-MachineData machine_data
+MachineDataStamped machine_data

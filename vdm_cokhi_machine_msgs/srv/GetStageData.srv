@@ -1,6 +1,9 @@
 string stage
-int32 days
+string min_date
+string max_date
+string shift
 ---
 bool success
 string status
-MachineData[] machines_data
+string stage_name
+MachineDataStamped[] stage_data
